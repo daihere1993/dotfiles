@@ -22,6 +22,7 @@ ATTENTION_STATUSES = {ConflictStatus.CONFLICT, ConflictStatus.OVERWRITABLE_CONFL
 UPDATE_STATUSES = {
     ConflictStatus.ABSENT,
     ConflictStatus.ADOPTABLE_EMPTY,
+    ConflictStatus.MIGRATABLE,
     ConflictStatus.REPLACEABLE_MANAGED,
 }
 QUIET_OK_STATUSES = {
@@ -39,6 +40,7 @@ REASON_LABELS = {
     "target matches the active generation": "will update to new generation",
     "desired target is absent": "will be created",
     "empty user-owned rules file can be safely adopted": "empty file will be adopted",
+    "existing SSH config will migrate to config.local": "will migrate to ~/.ssh/config.local",
     "retired target is already absent": "retired target already absent",
     "retired target matches the active generation": "retired target will be removed",
 }
@@ -46,6 +48,7 @@ REASON_LABELS = {
 STATUS_LABELS = {
     ConflictStatus.ABSENT: "create",
     ConflictStatus.ADOPTABLE_EMPTY: "adopt",
+    ConflictStatus.MIGRATABLE: "migrate",
     ConflictStatus.CURRENTLY_MANAGED: "ok",
     ConflictStatus.REPLACEABLE_MANAGED: "update",
     ConflictStatus.RETIRED_ABSENT: "retired",
@@ -690,7 +693,7 @@ def render_rollback_result_text(result: DomainResult, *, style: Style | None = N
 
 
 def render_error_text(error: DotfilesError, *, style: Style | None = None) -> str:
-    style = style or Style(enabled=Style(stderr_enabled()))
+    style = style or Style(enabled=stderr_enabled())
     lines = [_section_title(style, "Error"), f"  {error.message}"]
     if error.modified_state is True:
         modification = "yes; the operation reports the changed state above"

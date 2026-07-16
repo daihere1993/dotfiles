@@ -52,6 +52,7 @@
         pyproject = true;
         src = self;
         build-system = [ pkgs.python3Packages.setuptools ];
+        makeWrapperArgs = [ "--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.nix ]}" ];
       };
       parseIdentity = identityJson:
         let identity = builtins.fromJSON identityJson;

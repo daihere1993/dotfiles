@@ -46,6 +46,10 @@ These optional files remain user-owned and are never read or deployed by dotfile
 ~/.ssh/config.local
 ```
 
+On the first apply, an existing safe `~/.ssh/config` is moved to
+`~/.ssh/config.local`. If both files exist, the old main config is appended to
+`config.local` before dotfiles installs its generated main config.
+
 Doctor checks only their file type, owner, and write permissions.
 
 ## Agent rules and skills

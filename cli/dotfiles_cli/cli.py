@@ -74,6 +74,7 @@ from .present import (
     render_rollback_cancelled_text,
     render_rollback_result_text,
     render_validate_text,
+    stderr_enabled,
 )
 from .state import backup_root, read_receipt
 
@@ -387,7 +388,10 @@ def _cmd_apply(args: argparse.Namespace, runner: SubprocessRunner) -> int:
     preflight_errors: dict[str, ConflictError] = {}
     system_others = [manifests[platform] for platform in PLATFORMS]
     try:
-        _system_preflight(identity, manifests["system"], system_others)
+        _, _, system_results = _system_preflight(
+            identity, manifests["system"], system_others
+        )
+        plans["system"] = (system_results, None)
     except ConflictError as error:
         preflight_errors["system"] = error
     for platform in PLATFORMS:
@@ -615,5 +619,5 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_internal_compile(args)
         raise AssertionError(args.command)
     except DotfilesError as error:
-        print(render_error_text(error, style=Style(enabled=Style.stderr_enabled())), file=sys.stderr)
+        print(render_error_text(error, style=Style(enabled=stderr_enabled())), file=sys.stderr)
         return error.exit_code

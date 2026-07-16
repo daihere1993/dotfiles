@@ -13,6 +13,16 @@ from .errors import BuildError, ValidationError
 from .jsonutil import canonical_json
 from .models import MachineIdentity
 
+NIX_FEATURE_ARGS = ["--extra-experimental-features", "nix-command flakes"]
+
+
+def nix_command(*arguments: str) -> list[str]:
+    return ["nix", *NIX_FEATURE_ARGS, *arguments]
+
+
+def nix_instantiate_command(*arguments: str) -> list[str]:
+    return ["nix-instantiate", *NIX_FEATURE_ARGS, *arguments]
+
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -27,7 +37,13 @@ class CommandRunner(Protocol):
 
 class SubprocessRunner:
     def run(self, command: Sequence[str], *, check: bool = True) -> CommandResult:
-        process = subprocess.run(command, check=False, capture_output=True, text=True)
+        try:
+            process = subprocess.run(command, check=False, capture_output=True, text=True)
+        except OSError as error:
+            raise BuildError(
+                f"could not execute {command[0]}: {error}",
+                next_step="Install the required command or repair the dot CLI profile, then retry.",
+            ) from error
         result = CommandResult(process.returncode, process.stdout, process.stderr)
         if check and process.returncode:
             detail = f"{' '.join(command)}\n{process.stderr.strip()}"
@@ -54,7 +70,7 @@ def identity_json(identity: MachineIdentity) -> str:
 
 
 def archive_repository(runner: CommandRunner, repository: Path) -> Path:
-    result = runner.run(["nix", "flake", "archive", "--json", f"path:{repository}"])
+    result = runner.run(nix_command("flake", "archive", "--json", f"path:{repository}"))
     try:
         path = Path(json.loads(result.stdout)["path"])
     except (json.JSONDecodeError, KeyError, TypeError) as error:
@@ -96,8 +112,7 @@ def build_domain(
     domain: str,
 ) -> Path:
     instantiated = runner.run(
-        [
-            "nix-instantiate",
+        nix_instantiate_command(
             str(repository / "nix/cli-domain.nix"),
             "--argstr",
             "repository",
@@ -108,14 +123,16 @@ def build_domain(
             "--argstr",
             "platform",
             domain,
-        ]
+        )
     )
     drv_paths = [line for line in instantiated.stdout.splitlines() if line.endswith(".drv")]
     if len(drv_paths) != 1:
         raise BuildError(
             f"Nix returned {len(drv_paths)} derivations for {domain}: {instantiated.stdout!r}"
         )
-    result = runner.run(["nix", "build", "--no-link", "--print-out-paths", f"{drv_paths[0]}^*"])
+    result = runner.run(
+        nix_command("build", "--no-link", "--print-out-paths", f"{drv_paths[0]}^*")
+    )
     paths = [Path(line) for line in result.stdout.splitlines() if line.startswith("/nix/store/")]
     if len(paths) != 1:
         raise BuildError(f"Nix returned {len(paths)} output paths for {domain}: {result.stdout!r}")
@@ -124,8 +141,7 @@ def build_domain(
 
 def evaluate_system(runner: CommandRunner, repository: Path, identity: MachineIdentity) -> str:
     result = runner.run(
-        [
-            "nix-instantiate",
+        nix_instantiate_command(
             "--eval",
             "--strict",
             "--json",
@@ -136,7 +152,7 @@ def evaluate_system(runner: CommandRunner, repository: Path, identity: MachineId
             "--argstr",
             "identityJson",
             identity_json(identity),
-        ]
+        )
     )
     try:
         return json.loads(result.stdout)
@@ -146,8 +162,7 @@ def evaluate_system(runner: CommandRunner, repository: Path, identity: MachineId
 
 def read_agent_config(runner: CommandRunner, repository: Path) -> dict:
     result = runner.run(
-        [
-            "nix-instantiate",
+        nix_instantiate_command(
             "--eval",
             "--strict",
             "--json",
@@ -155,7 +170,7 @@ def read_agent_config(runner: CommandRunner, repository: Path) -> dict:
             "--argstr",
             "repository",
             str(repository),
-        ]
+        )
     )
     try:
         return json.loads(result.stdout)

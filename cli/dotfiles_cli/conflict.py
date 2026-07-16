@@ -51,6 +51,44 @@ def is_overwritable_skill(
         return False
 
 
+def is_migratable_ssh_config(resource: Resource, identity: MachineIdentity) -> bool:
+    target = Path(resource.target)
+    local = target.with_name("config.local")
+    if (
+        resource.id != "home.ssh.config"
+        or resource.kind != "file-link"
+        or target != identity.home / ".ssh/config"
+    ):
+        return False
+    try:
+        parent_info = target.parent.lstat()
+        target_info = target.lstat()
+    except OSError:
+        return False
+    if (
+        not stat.S_ISDIR(parent_info.st_mode)
+        or stat.S_ISLNK(parent_info.st_mode)
+        or parent_info.st_uid != os.getuid()
+        or not stat.S_ISREG(target_info.st_mode)
+        or stat.S_ISLNK(target_info.st_mode)
+        or target_info.st_uid != os.getuid()
+        or target_info.st_mode & 0o022 != 0
+    ):
+        return False
+    if not local.exists() and not local.is_symlink():
+        return True
+    try:
+        local_info = local.lstat()
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(local_info.st_mode)
+        and not stat.S_ISLNK(local_info.st_mode)
+        and local_info.st_uid == os.getuid()
+        and local_info.st_mode & 0o022 == 0
+    )
+
+
 def _is_adoptable_empty_file(resource: Resource) -> bool:
     if resource.kind != "file-link":
         return False
@@ -75,7 +113,10 @@ def resource_conforms(resource: Resource) -> bool:
     if not target.is_symlink():
         return False
     try:
-        if os.readlink(target) != resource.link_target:
+        if (
+            resource.owner != "home-manager"
+            and os.readlink(target) != resource.link_target
+        ):
             return False
         resolved = target.resolve(strict=True)
     except (OSError, RuntimeError):
@@ -173,6 +214,16 @@ def classify_manifests(
                 ConflictStatus.OVERWRITABLE_CONFLICT,
                 result.resource,
                 "existing user-owned skill can be backed up and overwritten",
+            )
+        elif (
+            result.status == ConflictStatus.CONFLICT
+            and desired_by_id.get(resource_id) is not None
+            and is_migratable_ssh_config(result.resource, desired.identity)
+        ):
+            result = ConflictResult(
+                ConflictStatus.MIGRATABLE,
+                result.resource,
+                "existing SSH config will migrate to config.local",
             )
         results.append(result)
     return results

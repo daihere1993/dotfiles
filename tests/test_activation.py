@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from dotfiles_cli.activation import (
     activate_platform,
@@ -19,6 +20,7 @@ from dotfiles_cli.activation import (
 from dotfiles_cli.compiler import SkillSource, compile_platform
 from dotfiles_cli.doctor import diagnose_manifest, diagnostics_healthy
 from dotfiles_cli.errors import ActivationError
+from dotfiles_cli.hashing import file_sha256
 from dotfiles_cli.manifest import dump_manifest
 from dotfiles_cli.models import (
     ActivationPlan,
@@ -27,6 +29,7 @@ from dotfiles_cli.models import (
     DeploymentState,
     DiagnosticStatus,
     MachineIdentity,
+    Resource,
     ResourceDecision,
 )
 from dotfiles_cli.nix import CommandResult
@@ -56,8 +59,10 @@ class SystemRunner:
         self.generations = {1}
         self.pending: Path | None = None
         self.deleted: list[int] = []
+        self.commands: list[list[str]] = []
 
     def run(self, command, *, check=True):
+        self.commands.append(list(command))
         if "--list-generations" in command:
             output = "".join(
                 f"{number} 2026-01-01 00:00:00\n" for number in sorted(self.generations)
@@ -85,7 +90,51 @@ class SystemRunner:
         return CommandResult(0, "", "")
 
 
+class SshSystemRunner(SystemRunner):
+    def __init__(self, current_link: Path, system: Path, config: Path, generated: Path):
+        super().__init__(current_link)
+        self.system = system
+        self.config = config
+        self.generated = generated
+
+    def run(self, command, *, check=True):
+        result = super().run(command, check=check)
+        if (
+            command[0] == "sudo"
+            and command[1] == str(self.system / "activate")
+            and not self.config.exists()
+            and not self.config.is_symlink()
+        ):
+            self.config.symlink_to(self.generated)
+        return result
+
+
+class FailingProfileSetRunner(SystemRunner):
+    def run(self, command, *, check=True):
+        if command[:2] == ["sudo", "nix-env"] and "--set" in command:
+            raise ActivationError("injected profile set failure")
+        return super().run(command, check=check)
+
+
+class NoNewGenerationRunner(SystemRunner):
+    def run(self, command, *, check=True):
+        if "--set" in command:
+            self.commands.append(list(command))
+            self.pending = Path(command[command.index("--set") + 1])
+            return CommandResult(0, "", "")
+        return super().run(command, check=check)
+
+
 class ActivationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.other_manifests = patch(
+            "dotfiles_cli.activation.other_active_manifests", return_value=[]
+        )
+        self.other_manifests.start()
+
+    def tearDown(self) -> None:
+        self.other_manifests.stop()
+
     def _system_store(self, root: Path, name: str, identity: MachineIdentity) -> Path:
         store = root / name
         (store / "sw/share/dotfiles").mkdir(parents=True)
@@ -95,6 +144,27 @@ class ActivationTests(unittest.TestCase):
             store / "sw/share/dotfiles/system-manifest.json",
         )
         return store
+
+    def _add_ssh_resource(
+        self, store: Path, identity: MachineIdentity
+    ) -> tuple[Path, Resource]:
+        generated = store / "ssh-config"
+        generated.write_text("Include ~/.ssh/config.local\n")
+        resource = Resource(
+            "home.ssh.config",
+            "home-manager",
+            "file-link",
+            str(identity.home / ".ssh/config"),
+            ("modules/home/ssh.nix",),
+            link_target=str(generated),
+            store_path=str(generated),
+            sha256=file_sha256(generated),
+        )
+        dump_manifest(
+            DeploymentManifest(identity, "system", (resource,)),
+            store / "sw/share/dotfiles/system-manifest.json",
+        )
+        return generated, resource
 
     def test_initial_platform_activation_and_update_keep_stable_entry(self) -> None:
         repository = Path(__file__).resolve().parents[1]
@@ -486,6 +556,161 @@ class ActivationTests(unittest.TestCase):
                 self.assertEqual(current.resolve(), old.resolve())
                 self.assertEqual(runner.deleted, [2])
 
+    def test_system_activation_migrates_and_appends_existing_ssh_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            identity = MachineIdentity("alice", str(root / "home"))
+            ssh = identity.home / ".ssh"
+            ssh.mkdir(parents=True, mode=0o700)
+            config = ssh / "config"
+            config.write_text("Host work\n  User alice\n")
+            config.chmod(0o600)
+            local = ssh / "config.local"
+            local.write_text("Host local\n  User local\n")
+            local.chmod(0o600)
+            old = self._system_store(root, "old-system", identity)
+            target = self._system_store(root, "new-system", identity)
+            generated, _ = self._add_ssh_resource(target, identity)
+            current = root / "current-system"
+            current.symlink_to(old)
+            runner = SshSystemRunner(current, target, config, generated)
+
+            result = activate_system_store(
+                runner,
+                target,
+                identity,
+                current_link=current,
+                profile=root / "system-profile",
+            )
+
+            self.assertEqual(result.status, "UPDATED")
+            self.assertEqual(config.resolve(), generated.resolve())
+            self.assertEqual(
+                local.read_text(),
+                "Host local\n  User local\n"
+                "\n# Migrated from ~/.ssh/config by dot apply\n"
+                "Host work\n  User alice\n",
+            )
+            activate_system_store(
+                runner,
+                target,
+                identity,
+                current_link=current,
+                profile=root / "system-profile",
+            )
+            self.assertEqual(local.read_text().count("# Migrated from"), 1)
+
+    def test_failed_system_activation_restores_ssh_migration(self) -> None:
+        for existing_local in (False, True):
+            with (
+                self.subTest(existing_local=existing_local),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                identity = MachineIdentity("alice", str(root / "home"))
+                ssh = identity.home / ".ssh"
+                ssh.mkdir(parents=True, mode=0o700)
+                config = ssh / "config"
+                config.write_text("Host work\n  User alice\n")
+                config.chmod(0o600)
+                local = ssh / "config.local"
+                if existing_local:
+                    local.write_text("Host local\n  User local\n")
+                    local.chmod(0o600)
+                old = self._system_store(root, "old-system", identity)
+                target = self._system_store(root, "new-system", identity)
+                self._add_ssh_resource(target, identity)
+                current = root / "current-system"
+                current.symlink_to(old)
+                runner = SystemRunner(current, fail_target=target)
+
+                with self.assertRaises(ActivationError):
+                    activate_system_store(
+                        runner,
+                        target,
+                        identity,
+                        current_link=current,
+                        profile=root / "system-profile",
+                    )
+
+                self.assertEqual(config.read_text(), "Host work\n  User alice\n")
+                if existing_local:
+                    self.assertEqual(local.read_text(), "Host local\n  User local\n")
+                else:
+                    self.assertFalse(local.exists())
+                self.assertEqual(list(ssh.glob(".config.dotfiles-migration-*")), [])
+
+    def test_failed_initial_profile_set_reports_ssh_migration_rolled_back(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            identity = MachineIdentity("alice", str(root / "home"))
+            ssh = identity.home / ".ssh"
+            ssh.mkdir(parents=True, mode=0o700)
+            config = ssh / "config"
+            config.write_text("Host work\n  User alice\n")
+            config.chmod(0o600)
+            target = self._system_store(root, "new-system", identity)
+            self._add_ssh_resource(target, identity)
+            current = root / "current-system"
+            runner = FailingProfileSetRunner(current)
+
+            with self.assertRaises(ActivationError) as caught:
+                activate_system_store(
+                    runner,
+                    target,
+                    identity,
+                    current_link=current,
+                    profile=root / "system-profile",
+                )
+
+            self.assertIn("ROLLED_BACK", str(caught.exception))
+            self.assertNotIn("RECOVERY_REQUIRED", str(caught.exception))
+            self.assertFalse(caught.exception.modified_state)
+            self.assertEqual(config.read_text(), "Host work\n  User alice\n")
+            self.assertFalse((ssh / "config.local").exists())
+
+    def test_failed_initial_activation_keeps_current_profile_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            identity = MachineIdentity("alice", str(root / "home"))
+            identity.home.mkdir()
+            target = self._system_store(root, "new-system", identity)
+            current = root / "current-system"
+            runner = SystemRunner(current, fail_target=target)
+
+            with self.assertRaises(ActivationError) as caught:
+                activate_system_store(
+                    runner,
+                    target,
+                    identity,
+                    current_link=current,
+                    profile=root / "system-profile",
+                )
+
+            self.assertIn("RECOVERY_REQUIRED", str(caught.exception))
+            self.assertEqual(runner.deleted, [])
+
+    def test_system_activation_accepts_unchanged_profile_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            identity = MachineIdentity("alice", str(root / "home"))
+            identity.home.mkdir()
+            target = self._system_store(root, "system", identity)
+            current = root / "current-system"
+            runner = NoNewGenerationRunner(current)
+
+            result = activate_system_store(
+                runner,
+                target,
+                identity,
+                current_link=current,
+                profile=root / "system-profile",
+            )
+
+            self.assertEqual(result.status, "UPDATED")
+            self.assertEqual(current.resolve(), target.resolve())
+            self.assertEqual(runner.generations, {1})
+
     def test_initial_system_activation_without_old_generation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -502,6 +727,13 @@ class ActivationTests(unittest.TestCase):
             )
             self.assertEqual(result.status, "UPDATED")
             self.assertEqual(current.resolve(), target.resolve())
+            generation_queries = [
+                command for command in runner.commands if "--list-generations" in command
+            ]
+            self.assertEqual(len(generation_queries), 2)
+            self.assertTrue(
+                all(command[:2] == ["sudo", "nix-env"] for command in generation_queries)
+            )
 
 
 if __name__ == "__main__":

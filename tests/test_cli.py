@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dotfiles_cli.cli import _resolve_platform_actions
+from dotfiles_cli.cli import _resolve_platform_actions, main
+from dotfiles_cli.errors import ValidationError
 from dotfiles_cli.models import (
     ActivationPlan,
     ConflictResult,
@@ -68,6 +69,20 @@ class ConflictPromptTests(unittest.TestCase):
                 plans["codex"][1].actions[0].decision,
                 ResourceDecision.SKIP,
             )
+
+
+class ErrorRenderingTests(unittest.TestCase):
+    def test_main_renders_dotfiles_error_without_traceback(self) -> None:
+        error = ValidationError("unsafe state", next_step="Fix its permissions.")
+        with (
+            patch("dotfiles_cli.cli._cmd_init", side_effect=error),
+            patch("dotfiles_cli.cli.stderr_enabled", return_value=False),
+            patch("sys.stderr") as stderr,
+        ):
+            self.assertEqual(main(["init"]), error.exit_code)
+        output = "".join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertIn("unsafe state", output)
+        self.assertIn("Fix its permissions.", output)
 
 
 if __name__ == "__main__":

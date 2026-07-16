@@ -3,11 +3,29 @@ set -eu
 
 script_directory=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repository=$(dirname -- "$script_directory")
-state_root=$HOME/.local/state/dotfiles/cli
+dotfiles_state_root=$HOME/.local/state/dotfiles
+state_root=$dotfiles_state_root/cli
 profile=$state_root/profile
 bin_directory=$HOME/.local/bin
 entry=$bin_directory/dot
 expected=$profile/bin/dot
+
+if [ -L "$dotfiles_state_root" ]; then
+  echo "dotfiles state root must not be a symlink: $dotfiles_state_root" >&2
+  exit 3
+fi
+if [ -e "$dotfiles_state_root" ] && [ ! -d "$dotfiles_state_root" ]; then
+  echo "dotfiles state root must be a directory: $dotfiles_state_root" >&2
+  exit 3
+fi
+mkdir -p "$dotfiles_state_root"
+
+owner=$(/usr/bin/stat -f '%u' "$dotfiles_state_root")
+if [ "$owner" != "$(id -u)" ]; then
+  echo "dotfiles state root is not owned by the current user: $dotfiles_state_root" >&2
+  exit 3
+fi
+chmod 0700 "$dotfiles_state_root"
 
 if [ -L "$state_root" ]; then
   echo "dot CLI state root must not be a symlink: $state_root" >&2

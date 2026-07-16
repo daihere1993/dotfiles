@@ -12,7 +12,7 @@ from dotfiles_cli.compiler import (
     validate_external_locks,
     validate_skill,
 )
-from dotfiles_cli.conflict import classify_resource, resource_conforms
+from dotfiles_cli.conflict import classify_manifests, classify_resource, resource_conforms
 from dotfiles_cli.doctor import diagnose_manifest, diagnostics_healthy
 from dotfiles_cli.errors import ValidationError
 from dotfiles_cli.hashing import directory_entries, directory_sha256, file_sha256
@@ -63,6 +63,15 @@ class CoreTests(unittest.TestCase):
         link.symlink_to(real)
         with self.assertRaises(ValidationError):
             read_identity(link)
+
+    def test_machine_state_rejects_group_readable_directory(self) -> None:
+        state = self.root / "state"
+        state.mkdir(mode=0o700)
+        path = state / "machine.json"
+        self.assertTrue(write_identity(self.identity, path))
+        state.chmod(0o755)
+        with self.assertRaisesRegex(ValidationError, "mode 0700"):
+            read_identity(path)
 
     def test_directory_hash_includes_empty_directory_and_executable(self) -> None:
         skill = self.root / "skill"
@@ -187,6 +196,56 @@ class CoreTests(unittest.TestCase):
         target.write_text("")
         target.chmod(0o666)
         self.assertEqual(classify_resource(resource, None).status, ConflictStatus.CONFLICT)
+
+    def test_safe_existing_ssh_config_is_migratable(self) -> None:
+        ssh = self.identity.home / ".ssh"
+        ssh.mkdir(mode=0o700)
+        target = ssh / "config"
+        target.write_text("Host example\n  User alice\n")
+        target.chmod(0o600)
+        store = self.root / "ssh-config"
+        store.write_text("Include ~/.ssh/config.local\n")
+        resource = Resource(
+            "home.ssh.config",
+            "home-manager",
+            "file-link",
+            str(target),
+            link_target=str(store),
+            store_path=str(store),
+            sha256=file_sha256(store),
+        )
+        manifest = DeploymentManifest(self.identity, "system", (resource,))
+        self.assertEqual(
+            classify_manifests(manifest, None)[0].status,
+            ConflictStatus.MIGRATABLE,
+        )
+        target.chmod(0o666)
+        self.assertEqual(
+            classify_manifests(manifest, None)[0].status,
+            ConflictStatus.CONFLICT,
+        )
+
+    def test_home_manager_resource_accepts_equivalent_store_link(self) -> None:
+        source = self.root / "hm-source"
+        source.write_text("managed content")
+        generation_link = self.root / "generation-link"
+        generation_link.symlink_to(source)
+        installed_link = self.root / "home-manager-files-link"
+        installed_link.symlink_to(source)
+        target = self.identity.home / "managed"
+        target.symlink_to(installed_link)
+        resource = Resource(
+            "home.managed",
+            "home-manager",
+            "file-link",
+            str(target),
+            ("modules/home/test.nix",),
+            link_target=str(generation_link),
+            store_path=str(source),
+            sha256=file_sha256(source),
+        )
+
+        self.assertTrue(resource_conforms(resource))
 
     def test_compiler_owns_individual_skills_not_the_skills_root(self) -> None:
         repository = Path(__file__).resolve().parents[1]

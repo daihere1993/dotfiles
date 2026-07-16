@@ -5,6 +5,7 @@ import re
 import shutil
 import stat
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from .adapters import get_adapter
@@ -634,6 +635,94 @@ def current_system_store(current_link: Path = Path("/run/current-system")) -> Pa
         raise ActivationError(f"cannot resolve current system: {current_link}") from error
 
 
+@dataclass
+class _SshConfigMigration:
+    source: Path
+    local: Path
+    temporary: Path | None = None
+    original_local_size: int | None = None
+
+    def commit(self) -> None:
+        if self.temporary is not None:
+            self.temporary.unlink(missing_ok=True)
+
+    def rollback(self) -> None:
+        if self.source.is_symlink():
+            self.source.unlink()
+        elif self.source.exists():
+            raise ActivationError(
+                f"refusing to restore SSH config over changed path: {self.source}"
+            )
+        if self.temporary is None:
+            if not self.local.is_file() or self.local.is_symlink():
+                raise ActivationError(f"migrated SSH config changed unexpectedly: {self.local}")
+            os.replace(self.local, self.source)
+            return
+        if not self.local.is_file() or self.local.is_symlink():
+            raise ActivationError(f"local SSH config changed unexpectedly: {self.local}")
+        if self.original_local_size is None:
+            raise ActivationError("SSH config migration is missing its original file size")
+        with self.local.open("r+b") as stream:
+            stream.truncate(self.original_local_size)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(self.temporary, self.source)
+
+
+def _migrate_ssh_config(
+    identity: MachineIdentity, results: list
+) -> _SshConfigMigration | None:
+    candidates = [
+        result
+        for result in results
+        if result.status == ConflictStatus.MIGRATABLE
+        and result.resource.id == "home.ssh.config"
+    ]
+    if not candidates:
+        return None
+    if len(candidates) != 1:
+        raise ActivationError("system manifest contains multiple SSH config migrations")
+    source = Path(candidates[0].resource.target)
+    local = identity.home / ".ssh/config.local"
+    if not local.exists() and not local.is_symlink():
+        try:
+            os.replace(source, local)
+        except OSError as error:
+            raise ActivationError(f"could not migrate SSH config: {error}") from error
+        return _SshConfigMigration(source, local)
+
+    temporary = source.with_name(f".config.dotfiles-migration-{uuid.uuid4()}")
+    try:
+        original_size = local.stat().st_size
+        os.replace(source, temporary)
+    except OSError as error:
+        raise ActivationError(f"could not prepare SSH config migration: {error}") from error
+    migration = _SshConfigMigration(source, local, temporary, original_size)
+    try:
+        old_config = temporary.read_bytes()
+        with local.open("ab") as stream:
+            if original_size:
+                with local.open("rb") as existing:
+                    existing.seek(-1, os.SEEK_END)
+                    if existing.read(1) != b"\n":
+                        stream.write(b"\n")
+            stream.write(b"\n# Migrated from ~/.ssh/config by dot apply\n")
+            stream.write(old_config)
+            if old_config and not old_config.endswith(b"\n"):
+                stream.write(b"\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception as error:
+        try:
+            migration.rollback()
+        except Exception as rollback_error:
+            raise ActivationError(
+                f"could not migrate SSH config: {error}; recovery failed: {rollback_error}"
+            ) from error
+        raise ActivationError(f"could not migrate SSH config: {error}") from error
+    return migration
+
+
 def _generation_numbers(output: str) -> set[int]:
     return {
         int(match.group(1))
@@ -660,28 +749,44 @@ def activate_system_store(
     )
     if active is not None:
         assert_identity(identity, active)
-    preflight_platform(desired, active)
+    results = preflight_platform(desired, active)
+    migration = _migrate_ssh_config(identity, results)
+    if migration is not None:
+        try:
+            preflight_platform(desired, active)
+        except Exception:
+            migration.rollback()
+            raise
     before = _generation_numbers(
-        runner.run(["nix-env", "--profile", str(profile), "--list-generations"], check=False).stdout
+        runner.run(
+            ["sudo", "nix-env", "--profile", str(profile), "--list-generations"],
+            check=False,
+        ).stdout
     )
     generation: int | None = None
+    profile_changed = False
     try:
         runner.run(["sudo", "nix-env", "--profile", str(profile), "--set", str(target)])
+        profile_changed = True
         after = _generation_numbers(
-            runner.run(["nix-env", "--profile", str(profile), "--list-generations"]).stdout
+            runner.run(
+                ["sudo", "nix-env", "--profile", str(profile), "--list-generations"]
+            ).stdout
         )
         created = after - before
-        if len(created) != 1:
+        if len(created) > 1:
             raise ActivationError(
                 f"could not identify the new system generation: {sorted(created)}"
             )
-        generation = created.pop()
+        generation = created.pop() if created else None
         runner.run(["sudo", str(target / "activate")])
         if current_system_store(current_link) != target.resolve(strict=True):
             raise ActivationError("/run/current-system did not switch to the target closure")
         diagnostics = diagnose_manifest(identity, desired)
         if not diagnostics_healthy(diagnostics):
             raise ActivationError("system doctor found unhealthy resources after activation")
+        if migration is not None:
+            migration.commit()
         return DomainResult("system", "UPDATED", f"activated {target}")
     except Exception as original:
         recovery_errors: list[str] = []
@@ -697,9 +802,9 @@ def activate_system_store(
                     raise ActivationError("old system doctor found unhealthy resources")
             except Exception as error:
                 recovery_errors.append(f"old closure recovery failed: {error}")
-        else:
+        elif profile_changed:
             recovery_errors.append("no previous system closure exists for recovery")
-        if generation is not None:
+        if generation is not None and old is not None:
             try:
                 runner.run(
                     [
@@ -713,12 +818,20 @@ def activate_system_store(
                 )
             except Exception as error:
                 recovery_errors.append(f"failed generation cleanup failed: {error}")
+        if migration is not None:
+            try:
+                migration.rollback()
+            except Exception as error:
+                recovery_errors.append(f"SSH config migration recovery failed: {error}")
         suffix = (
             "; RECOVERY_REQUIRED: " + "; ".join(recovery_errors)
             if recovery_errors
             else "; ROLLED_BACK"
         )
-        raise ActivationError(f"system activation failed: {original}{suffix}") from original
+        raise ActivationError(
+            f"system activation failed: {original}{suffix}",
+            modified_state=None if recovery_errors else False,
+        ) from original
 
 
 def select_previous_system_generation(

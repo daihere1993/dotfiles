@@ -3,8 +3,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from dotfiles_cli.errors import BuildError
 from dotfiles_cli.models import MachineIdentity
-from dotfiles_cli.nix import CommandResult, build_domain
+from dotfiles_cli.nix import CommandResult, SubprocessRunner, build_domain
 
 
 class RecordingRunner:
@@ -28,7 +29,15 @@ class NixCommandTests(unittest.TestCase):
             "codex",
         )
         self.assertEqual(output, Path("/nix/store/test-domain"))
+        self.assertEqual(
+            runner.commands[0][1:3],
+            ["--extra-experimental-features", "nix-command flakes"],
+        )
         self.assertEqual(runner.commands[1][-1], "/nix/store/test-domain.drv^*")
+
+    def test_missing_command_becomes_build_error(self) -> None:
+        with self.assertRaisesRegex(BuildError, "could not execute"):
+            SubprocessRunner().run(["definitely-not-a-real-command"])
 
 
 if __name__ == "__main__":
