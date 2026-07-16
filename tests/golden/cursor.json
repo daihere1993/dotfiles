@@ -1,0 +1,6 @@
+[
+  {"path": "share", "type": "directory"},
+  {"path": "share/dotfiles", "type": "directory"},
+  {"path": "share/dotfiles/manifest.json", "sha256": "b77acc118f6b75bd8ad3b4902ea21812dd49d4a0fc7d12ca1b8b4b5516045bd1", "type": "file"},
+  {"path": "skills", "type": "directory"}
+]

@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+
+if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
+  echo "bootstrap requires Apple Silicon macOS" >&2
+  exit 2
+fi
+
+if ! xcode-select -p >/dev/null 2>&1; then
+  echo "Xcode Command Line Tools are required. Run: xcode-select --install" >&2
+  exit 2
+fi
+
+if ! command -v nix >/dev/null 2>&1; then
+  echo "Nix is not installed. Installing multi-user Nix from nixos.org..." >&2
+  installer=$(mktemp -t dotfiles-nix-install.XXXXXX)
+  trap 'rm -f "$installer"' EXIT HUP INT TERM
+  curl --fail --location --proto '=https' --tlsv1.2 \
+    --output "$installer" https://nixos.org/nix/install
+  sh "$installer" --daemon
+  rm -f "$installer"
+  trap - EXIT HUP INT TERM
+  if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+    # shellcheck disable=SC1091
+    . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+  fi
+fi
+
+./bootstrap/install-dot
+dot_cli=$HOME/.local/bin/dot
+
+run_with_expected_status() {
+  expected=$1
+  shift
+  set +e
+  "$@"
+  status=$?
+  set -e
+  case ":$expected:" in
+    *":$status:"*) return 0 ;;
+    *) return "$status" ;;
+  esac
+}
+
+"$dot_cli" init
+"$dot_cli" validate
+run_with_expected_status '0:3' "$dot_cli" apply --check
+run_with_expected_status '0:3' "$dot_cli" apply
+run_with_expected_status '0:6' "$dot_cli" doctor
+
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) echo "Add $HOME/.local/bin to PATH to run dot directly." >&2 ;;
+esac
+
+echo "Bootstrap complete. Agent vendor and GitHub authentication remain manual."

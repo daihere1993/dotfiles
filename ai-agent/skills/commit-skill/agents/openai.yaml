@@ -1,0 +1,5 @@
+interface:
+  display_name: "Commit Skill"
+  short_description: "Commit code with quality messages."
+  default_prompt: "Use $commit-skill to stage focused changes and commit them with a strong Conventional Commit message."
+

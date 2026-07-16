@@ -1,0 +1,7 @@
+[
+  {"path": "AGENTS.md", "sha256": "0825d9dfb035da393b6827d477a691266ddf7a1713f314560e765c4d54db119c", "type": "file"},
+  {"path": "share", "type": "directory"},
+  {"path": "share/dotfiles", "type": "directory"},
+  {"path": "share/dotfiles/manifest.json", "sha256": "a0b1c9487527a94dd5a4ede450ee3aee51625a2a2af6325270aefce373a17d62", "type": "file"},
+  {"path": "skills", "type": "directory"}
+]
