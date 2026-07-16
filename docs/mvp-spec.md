@@ -725,6 +725,10 @@ dot rollback
 
 ### 12.4 `dot apply`
 
+#### 12.4.0 Apply UX
+
+`dot apply` 以分阶段输出呈现：Plan、Build、Preflight、Changes、Resolve（如有可交互冲突）、Confirm（交互式 TTY 默认 `Apply? [y/N]`）、Apply、Verification、Result。`dot apply --check` 在 Changes 后停止，不 resolve、不 confirm、不 activate。`dot apply -y` 跳过最终确认，供 bootstrap 和非交互脚本使用。`--verbose` 展示全部 resource 并透传 Nix build 日志；`--json-events` 输出 NDJSON 事件流。上述输出阶段不改变 §12.4.1–12.4.3 的安全协议。
+
 #### 12.4.1 单 Agent platform apply
 
 `dot apply --platform codex` 只更新 Codex domain。macOS system generation、Git/SSH 配置、Claude 和 Cursor profiles 与 targets 保持当前已部署版本。

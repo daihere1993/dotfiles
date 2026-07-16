@@ -46,11 +46,24 @@
             rev = input.rev or null;
           })
         external.skills;
+      dotSrc = builtins.path {
+        path = ./.;
+        name = "dotfiles-cli-src";
+        filter = path: type:
+          let
+            root = toString ./.;
+            rel = if path == root then "" else pkgs.lib.removePrefix (root + "/") path;
+          in
+          rel == ""
+          || rel == "pyproject.toml"
+          || rel == "cli"
+          || pkgs.lib.hasPrefix "cli/" rel;
+      };
       dot = pkgs.python3Packages.buildPythonApplication {
         pname = "dotfiles-cli";
         version = "0.1.0";
         pyproject = true;
-        src = self;
+        src = dotSrc;
         build-system = [ pkgs.python3Packages.setuptools ];
         makeWrapperArgs = [ "--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.nix ]}" ];
       };

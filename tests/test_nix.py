@@ -12,10 +12,12 @@ class RecordingRunner:
     def __init__(self) -> None:
         self.commands: list[list[str]] = []
 
-    def run(self, command, *, check=True):
+    def run(self, command, *, check=True, stream=False, on_line=None):
         self.commands.append(list(command))
         if command[0] == "nix-instantiate":
             return CommandResult(0, "/nix/store/test-domain.drv\n", "")
+        if on_line is not None:
+            on_line("building test-domain")
         return CommandResult(0, "/nix/store/test-domain\n", "")
 
 
@@ -38,6 +40,21 @@ class NixCommandTests(unittest.TestCase):
     def test_missing_command_becomes_build_error(self) -> None:
         with self.assertRaisesRegex(BuildError, "could not execute"):
             SubprocessRunner().run(["definitely-not-a-real-command"])
+
+
+    def test_build_domain_streams_verbose_lines(self) -> None:
+        runner = RecordingRunner()
+        lines: list[str] = []
+        build_domain(
+            runner,
+            Path("/repository"),
+            MachineIdentity("alice", "/Users/alice"),
+            "codex",
+            verbose=True,
+            on_substep=lambda domain, label: lines.append(f"{domain}:{label}"),
+        )
+        self.assertTrue(any("evaluating" in item for item in lines))
+        self.assertTrue(any("building" in item for item in lines))
 
 
 if __name__ == "__main__":

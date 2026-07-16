@@ -23,11 +23,18 @@ dot --version
 dot validate
 dot apply --check
 dot apply
+dot apply -y
 dot apply --platform codex
+dot apply --verbose
+dot apply --json-events
 dot doctor
 dot doctor --json
 dot rollback
 ```
+
+`dot apply` runs in phases: Plan, Build, Preflight, Changes, optional conflict resolution, confirmation, Apply, Verification, and Result. Progress is shown per deployment domain instead of waiting for a final summary. In an interactive terminal, `dot apply` asks `Apply? [y/N]` after conflicts are resolved; use `-y` to skip that prompt in scripts or bootstrap.
+
+`dot apply --check` stops after the Changes plan without modifying state. `--verbose` shows every resource in the Changes plan and streams Nix build output. `--json-events` emits one NDJSON event per line for automation.
 
 `dot apply --platform <platform>` builds and switches only that Agent profile. Agent resources are applied independently, so a conflicting skill does not block rules or other skills. A full apply resolves every conflict before making the first change, then continues in system, Codex, Claude, and Cursor order.
 

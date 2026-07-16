@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .apply_events import ChangeEntry, ChangeVerb, change_count, domains_with_changes
 from .errors import ConflictError, DotfilesError
 from .models import (
     ConflictResult,
@@ -344,7 +345,96 @@ def render_apply_check_text(
     return "\n".join(lines)
 
 
-def render_apply_check_json(domains: list[DomainPreflight], *, identity: MachineIdentity) -> str:
+def _change_verb_color(style: Style, verb: ChangeVerb) -> str:
+    label = verb.value
+    if verb in {ChangeVerb.BLOCKED, ChangeVerb.CONFLICT}:
+        return style.red(label)
+    if verb in {ChangeVerb.SKIP, ChangeVerb.CONFLICT}:
+        return style.yellow(label)
+    if verb == ChangeVerb.OK:
+        return style.dim(label)
+    if verb in {ChangeVerb.CREATE, ChangeVerb.UPDATE, ChangeVerb.MIGRATE, ChangeVerb.ADOPT}:
+        return style.cyan(label)
+    return label
+
+
+def render_changes_plan(
+    entries: list[ChangeEntry],
+    *,
+    identity: MachineIdentity,
+    domain_order: list[str] | None = None,
+    verbose: bool = False,
+    style: Style | None = None,
+) -> str:
+    style = style or Style()
+    home = identity.home
+    order = domain_order or [domain for domain in ("system", *PLATFORMS)]
+    by_domain: dict[str, list[ChangeEntry]] = {domain: [] for domain in order}
+    for entry in entries:
+        by_domain.setdefault(entry.domain, []).append(entry)
+
+    lines: list[str] = [_section_title(style, "Changes")]
+    any_visible = False
+    for domain in order:
+        domain_entries = by_domain.get(domain, [])
+        visible = [
+            entry
+            for entry in domain_entries
+            if verbose or entry.verb not in {ChangeVerb.OK}
+        ]
+        if not visible:
+            if domain in {entry.domain for entry in entries} or not domain_entries:
+                has_changes = any(
+                    entry.verb not in {ChangeVerb.OK, ChangeVerb.BLOCKED, ChangeVerb.CONFLICT}
+                    for entry in domain_entries
+                )
+                if not domain_entries or not has_changes:
+                    lines.append(f"  {domain:<7} {style.dim('no changes')}")
+            continue
+        any_visible = True
+        lines.append(style.bold(f"  {domain}"))
+        for entry in visible:
+            verb = _change_verb_color(style, entry.verb)
+            target = shorten_user_path(entry.target, home)
+            lines.append(f"    {verb:<10} {target}")
+            if entry.reason and entry.verb not in {ChangeVerb.OK}:
+                lines.append(f"             {style.dim(entry.reason)}")
+
+    if not any_visible and not lines[-1].endswith("no changes"):
+        lines.append(f"  {style.dim('no changes needed')}")
+    return "\n".join(lines)
+
+
+def render_changes_summary(
+    entries: list[ChangeEntry],
+    *,
+    style: Style | None = None,
+) -> str:
+    style = style or Style()
+    count = change_count(entries)
+    domains = domains_with_changes(entries)
+    blocked = any(entry.verb == ChangeVerb.BLOCKED for entry in entries)
+    conflicts = any(entry.verb == ChangeVerb.CONFLICT for entry in entries)
+    if blocked:
+        return style.red("Blocked domains must be resolved before apply.")
+    if conflicts:
+        return style.yellow("Resolve conflicts above before apply.")
+    if count:
+        domain_count = len(domains)
+        noun = "resource" if count == 1 else "resources"
+        domain_noun = "domain" if domain_count == 1 else "domains"
+        return (
+            f"{count} {noun} will change across {domain_count} {domain_noun}"
+        )
+    return style.green("no changes needed")
+
+
+def render_apply_check_json(
+    domains: list[DomainPreflight],
+    *,
+    identity: MachineIdentity,
+    changes: list[ChangeEntry] | None = None,
+) -> str:
     home = identity.home
     blocked: dict[str, object] = {}
     resources: dict[str, list[dict[str, str]]] = {}
@@ -394,16 +484,39 @@ def render_apply_check_json(domains: list[DomainPreflight], *, identity: Machine
                 ],
             }
 
+    change_entries = changes or []
     payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "summary": {
             "ready": _ready_domains(domains),
             "blocked": _blocked_domains(domains),
+            "changeCount": change_count(change_entries),
             "exitCode": 3 if apply_check_has_conflicts(domains) else 0,
         },
         "builds": builds,
         "blocked": blocked,
         "resources": resources,
+        "phases": {
+            "build": [
+                {
+                    "domain": domain.domain,
+                    "store": str(domain.store),
+                    "storeLabel": shorten_store_path(domain.store),
+                    "resourceCount": domain.resource_count,
+                }
+                for domain in domains
+            ],
+            "changes": [
+                {
+                    "domain": entry.domain,
+                    "verb": entry.verb.value,
+                    "target": shorten_user_path(entry.target, home),
+                    "reason": entry.reason,
+                    "resourceId": entry.resource_id,
+                }
+                for entry in change_entries
+            ],
+        },
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
 

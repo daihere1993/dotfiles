@@ -4,8 +4,9 @@ import json
 import os
 import shlex
 import subprocess
-from collections.abc import Sequence
-from dataclasses import dataclass
+import threading
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -32,12 +33,35 @@ class CommandResult:
 
 
 class CommandRunner(Protocol):
-    def run(self, command: Sequence[str], *, check: bool = True) -> CommandResult: ...
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        check: bool = True,
+        stream: bool = False,
+        on_line: Callable[[str], None] | None = None,
+    ) -> CommandResult: ...
 
 
+@dataclass
 class SubprocessRunner:
-    def run(self, command: Sequence[str], *, check: bool = True) -> CommandResult:
+    default_stream: bool = False
+    default_on_line: Callable[[str], None] | None = None
+    _stderr_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        check: bool = True,
+        stream: bool | None = None,
+        on_line: Callable[[str], None] | None = None,
+    ) -> CommandResult:
+        use_stream = self.default_stream if stream is None else stream
+        line_handler = on_line or self.default_on_line
         try:
+            if use_stream and line_handler is not None:
+                return self._run_streaming(command, check=check, on_line=line_handler)
             process = subprocess.run(command, check=False, capture_output=True, text=True)
         except OSError as error:
             raise BuildError(
@@ -49,6 +73,69 @@ class SubprocessRunner:
             detail = f"{' '.join(command)}\n{process.stderr.strip()}"
             raise BuildError(
                 f"command failed ({process.returncode}): {detail}",
+                next_step="Review the build output, fix the configuration, then retry.",
+            )
+        return result
+
+    def _run_streaming(
+        self,
+        command: Sequence[str],
+        *,
+        check: bool,
+        on_line: Callable[[str], None],
+    ) -> CommandResult:
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError as error:
+            raise BuildError(
+                f"could not execute {command[0]}: {error}",
+                next_step="Install the required command or repair the dot CLI profile, then retry.",
+            ) from error
+
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+
+        def consume(stream, collector: list[str], forward: bool) -> None:
+            assert process.stdout is not None or process.stderr is not None
+            for line in iter(stream.readline, ""):
+                collector.append(line)
+                if forward and line.rstrip():
+                    on_line(line.rstrip("\n"))
+
+        threads = []
+        if process.stdout is not None:
+            threads.append(
+                threading.Thread(
+                    target=consume,
+                    args=(process.stdout, stdout_lines, False),
+                    daemon=True,
+                )
+            )
+        if process.stderr is not None:
+            threads.append(
+                threading.Thread(
+                    target=consume,
+                    args=(process.stderr, stderr_lines, True),
+                    daemon=True,
+                )
+            )
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        returncode = process.wait()
+        stdout = "".join(stdout_lines)
+        stderr = "".join(stderr_lines)
+        result = CommandResult(returncode, stdout, stderr)
+        if check and returncode:
+            detail = f"{' '.join(command)}\n{stderr.strip()}"
+            raise BuildError(
+                f"command failed ({returncode}): {detail}",
                 next_step="Review the build output, fix the configuration, then retry.",
             )
         return result
@@ -105,12 +192,27 @@ def reject_concurrent_apply(runner: CommandRunner) -> None:
             )
 
 
+BuildSubstepCallback = Callable[[str, str], None]
+
+
 def build_domain(
     runner: CommandRunner,
     repository: Path,
     identity: MachineIdentity,
     domain: str,
+    *,
+    verbose: bool = False,
+    on_substep: BuildSubstepCallback | None = None,
 ) -> Path:
+    def substep(label: str) -> None:
+        if on_substep is not None:
+            on_substep(domain, label)
+
+    def on_line(line: str) -> None:
+        if on_substep is not None:
+            on_substep(domain, line)
+
+    substep("evaluating derivation")
     instantiated = runner.run(
         nix_instantiate_command(
             str(repository / "nix/cli-domain.nix"),
@@ -123,15 +225,20 @@ def build_domain(
             "--argstr",
             "platform",
             domain,
-        )
+        ),
+        stream=verbose,
+        on_line=on_line if verbose else None,
     )
     drv_paths = [line for line in instantiated.stdout.splitlines() if line.endswith(".drv")]
     if len(drv_paths) != 1:
         raise BuildError(
             f"Nix returned {len(drv_paths)} derivations for {domain}: {instantiated.stdout!r}"
         )
+    substep("building")
     result = runner.run(
-        nix_command("build", "--no-link", "--print-out-paths", f"{drv_paths[0]}^*")
+        nix_command("build", "--no-link", "--print-out-paths", f"{drv_paths[0]}^*"),
+        stream=verbose,
+        on_line=on_line if verbose else None,
     )
     paths = [Path(line) for line in result.stdout.splitlines() if line.startswith("/nix/store/")]
     if len(paths) != 1:

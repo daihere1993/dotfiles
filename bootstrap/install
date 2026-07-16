@@ -46,7 +46,7 @@ dot_cli=$HOME/.local/bin/dot
 "$dot_cli" init
 "$dot_cli" validate
 "$dot_cli" apply --check
-"$dot_cli" apply
+"$dot_cli" apply -y
 "$dot_cli" doctor
 
 case ":$PATH:" in

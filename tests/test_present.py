@@ -135,8 +135,10 @@ class PresentTests(unittest.TestCase):
             )
         ]
         payload = json.loads(render_apply_check_json(domains, identity=identity))
+        self.assertEqual(payload["schemaVersion"], 2)
         self.assertEqual(payload["summary"]["blocked"], ["codex"])
         self.assertEqual(payload["summary"]["exitCode"], 3)
+        self.assertIn("phases", payload)
         self.assertEqual(
             payload["blocked"]["codex"]["conflicts"][0]["reason"],
             "user-owned skill (can overwrite)",

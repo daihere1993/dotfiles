@@ -8,15 +8,11 @@ from pathlib import Path
 
 from . import __version__
 from .activation import (
-    activate_platform,
     activate_system_store,
     current_platform,
     current_system_store,
-    effective_active_manifest,
-    make_resource_actions,
     other_active_manifests,
     preflight_platform,
-    profile_path,
     select_previous_system_generation,
     system_manifest_path,
 )
@@ -40,33 +36,22 @@ from .machine import (
 from .manifest import assert_identity, read_manifest
 from .models import (
     PLATFORMS,
-    ActivationPlan,
-    ConflictStatus,
-    DeploymentManifest,
     Diagnostic,
     DiagnosticStatus,
     MachineIdentity,
-    ResourceDecision,
 )
 from .nix import (
     SubprocessRunner,
     archive_repository,
-    build_domain,
     evaluate_system,
     find_repository,
     read_agent_config,
-    reject_concurrent_apply,
 )
+from .apply_flow import ApplyOptions, ApplySession
+from .apply_reporter import build_reporter
 from .present import (
     Style,
-    apply_check_has_conflicts,
-    build_apply_check_report,
-    format_conflict_prompt,
     format_rollback_prompt,
-    render_activation_results_text,
-    render_apply_check_json,
-    render_apply_check_text,
-    render_apply_preflight_text,
     render_doctor_json,
     render_doctor_text,
     render_error_text,
@@ -76,7 +61,7 @@ from .present import (
     render_validate_text,
     stderr_enabled,
 )
-from .state import backup_root, read_receipt
+from .state import read_receipt
 
 TEST_IDENTITY = MachineIdentity("testuser", "/Users/testuser")
 
@@ -98,6 +83,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     apply_parser.add_argument(
         "--json", action="store_true", dest="json_output", help="emit machine-readable preflight JSON"
+    )
+    apply_parser.add_argument(
+        "--json-events",
+        action="store_true",
+        help="emit NDJSON apply events to stdout",
+    )
+    apply_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="skip final apply confirmation",
     )
     apply_parser.add_argument("--platform", choices=PLATFORMS)
     doctor_parser = subparsers.add_parser("doctor", help="diagnose active managed resources")
@@ -202,275 +198,25 @@ def _cmd_validate(runner: SubprocessRunner) -> int:
     return 0
 
 
-def _manifest_for_built(domain: str, store: Path):
-    path = (
-        system_manifest_path(store)
-        if domain == "system"
-        else store / "share/dotfiles/manifest.json"
-    )
-    return read_manifest(path)
-
-
-def _platform_plan(
-    runner: SubprocessRunner,
-    repository: Path,
-    identity: MachineIdentity,
-    platform: str,
-):
-    store = build_domain(runner, repository, identity, platform)
-    desired = _manifest_for_built(platform, store)
-    assert_identity(identity, desired)
-    _, old_store, active = current_platform(identity, platform)
-    others = other_active_manifests(identity, platform)
-    receipt = read_receipt(identity, platform)
-    active = effective_active_manifest(active, receipt)
-    results = preflight_platform(desired, active, others, resource_level=True)
-    plan = ActivationPlan(
-        platform=platform,
-        identity=identity,
-        profile_path=str(profile_path(identity, platform)),
-        new_store_path=str(store),
-        desired_manifest=desired,
-        old_store_path=str(old_store) if old_store else None,
-        active_manifest=active,
-        old_receipt=receipt,
-    )
-    return store, desired, results, plan
-
-
-def _system_preflight(identity: MachineIdentity, desired, others: list):
-    try:
-        current_link = Path("/run/current-system")
-        if not current_link.exists() and not current_link.is_symlink():
-            return None, None, preflight_platform(desired, None, others)
-        old_store = current_system_store()
-        active_path = system_manifest_path(old_store)
-        active = read_manifest(active_path) if active_path.is_file() else None
-        if active:
-            assert_identity(identity, active)
-    except OSError:
-        old_store, active = None, None
-    return old_store, active, preflight_platform(desired, active, others)
-
-
-def _existing_kind(path: Path) -> str:
-    if path.is_symlink():
-        return "user-owned symlink"
-    if path.is_dir():
-        return "user-owned directory"
-    return "user-owned file"
-
-
-def _resolve_platform_actions(
-    plans: dict, *, interactive: bool, style: Style | None = None
-) -> bool:
-    style = style or Style()
-    mode: str | None = None
-    any_skipped = False
-    for platform in PLATFORMS:
-        if platform not in plans:
-            continue
-        results, plan = plans[platform]
-        overwrite_ids: set[str] = set()
-        for result in results:
-            if result.status != ConflictStatus.OVERWRITABLE_CONFLICT:
-                continue
-            choice = mode
-            if choice is None and interactive:
-                skill_id = result.resource.id.rsplit(".skill.", 1)[-1]
-                inventory = next(
-                    (item for item in plan.desired_manifest.skills if item.target_id == skill_id),
-                    None,
-                )
-                print(
-                    format_conflict_prompt(
-                        target=result.resource.target,
-                        home=plan.identity.home,
-                        existing_kind=_existing_kind(Path(result.resource.target)),
-                        desired=inventory.canonical_id if inventory else skill_id,
-                        backup_hint=str(backup_root(plan.identity)),
-                        style=style,
-                    )
-                )
-                while True:
-                    try:
-                        value = (
-                            input("Choice [o/s/a/k]: ")
-                            .strip()
-                            .lower()
-                        )
-                    except (EOFError, KeyboardInterrupt) as error:
-                        raise ConflictError(
-                            "interactive conflict resolution interrupted; no state was modified"
-                        ) from error
-                    if value in {"o", "s", "a", "k"}:
-                        break
-                    print("Choose o, s, a, or k.")
-                if value == "a":
-                    mode = "overwrite"
-                    choice = "overwrite"
-                elif value == "k":
-                    mode = "skip"
-                    choice = "skip"
-                else:
-                    choice = "overwrite" if value == "o" else "skip"
-            elif choice is None:
-                choice = "skip"
-            if choice == "overwrite":
-                overwrite_ids.add(result.resource.id)
-            else:
-                any_skipped = True
-        actions = make_resource_actions(
-            results, plan.desired_manifest, plan.old_receipt, overwrite_ids
-        )
-        if any(action.decision == ResourceDecision.SKIP for action in actions):
-            any_skipped = True
-        plans[platform] = (
-            results,
-            ActivationPlan(
-                plan.platform,
-                plan.identity,
-                plan.profile_path,
-                plan.new_store_path,
-                plan.desired_manifest,
-                plan.old_store_path,
-                plan.active_manifest,
-                actions,
-                plan.old_receipt,
-            ),
-        )
-    return any_skipped
-
-
 def _cmd_apply(args: argparse.Namespace, runner: SubprocessRunner) -> int:
-    if args.json_output and not args.check:
-        raise ValidationError("`--json` requires `--check`")
-    repository = find_repository(Path.cwd())
-    reject_concurrent_apply(runner)
-    repository = archive_repository(runner, repository)
     identity = read_identity()
-    style = Style()
-    if args.platform:
-        store, _, results, plan = _platform_plan(runner, repository, identity, args.platform)
-        plans = {args.platform: (results, plan)}
-        domains = build_apply_check_report(
-            identity=identity,
-            stores={args.platform: store},
-            manifests={args.platform: plan.desired_manifest},
-            plans=plans,
-            preflight_errors={},
-        )
-        if args.check:
-            if args.json_output:
-                print(render_apply_check_json(domains, identity=identity))
-            else:
-                print(render_apply_check_text(domains, identity=identity, verbose=args.verbose, style=style))
-            return 3 if apply_check_has_conflicts(domains) else 0
-        print(
-            render_apply_preflight_text(
-                domains, identity=identity, verbose=args.verbose, style=style
-            )
-        )
-        partial = _resolve_platform_actions(plans, interactive=sys.stdin.isatty(), style=style)
-        outcome = activate_platform(runner, plans[args.platform][1])
-        print(render_activation_results_text([outcome], [], style=style))
-        doctor = _cmd_doctor(
-            argparse.Namespace(platform=args.platform, json_output=False, verbose=False)
-        )
-        return 3 if partial else doctor
-
-    stores = {
-        domain: build_domain(runner, repository, identity, domain)
-        for domain in ("system", *PLATFORMS)
-    }
-    manifests = {domain: _manifest_for_built(domain, store) for domain, store in stores.items()}
-    plans = {}
-    preflight_errors: dict[str, ConflictError] = {}
-    system_others = [manifests[platform] for platform in PLATFORMS]
-    try:
-        _, _, system_results = _system_preflight(
-            identity, manifests["system"], system_others
-        )
-        plans["system"] = (system_results, None)
-    except ConflictError as error:
-        preflight_errors["system"] = error
-    for platform in PLATFORMS:
-        _, old_store, active = current_platform(identity, platform)
-        receipt = read_receipt(identity, platform)
-        active = effective_active_manifest(active, receipt)
-        others = [manifest for domain, manifest in manifests.items() if domain != platform]
-        try:
-            results = preflight_platform(manifests[platform], active, others, resource_level=True)
-        except ConflictError as error:
-            results = []
-            preflight_errors[platform] = error
-        plans[platform] = (
-            results,
-            ActivationPlan(
-                platform=platform,
-                identity=identity,
-                profile_path=str(profile_path(identity, platform)),
-                new_store_path=str(stores[platform]),
-                desired_manifest=manifests[platform],
-                old_store_path=str(old_store) if old_store else None,
-                active_manifest=active,
-                old_receipt=receipt,
-            ),
-        )
-    domains = build_apply_check_report(
+    options = ApplyOptions(
+        check=args.check,
+        verbose=args.verbose,
+        json_output=args.json_output,
+        json_events=args.json_events,
+        platform=args.platform,
+        yes=args.yes,
+    )
+    reporter = build_reporter(
         identity=identity,
-        stores=stores,
-        manifests=manifests,
-        plans=plans,
-        preflight_errors=preflight_errors,
+        verbose=args.verbose,
+        json_output=args.json_output,
+        json_events=args.json_events,
+        check=args.check,
     )
-    if args.check:
-        if args.json_output:
-            print(render_apply_check_json(domains, identity=identity))
-        else:
-            print(render_apply_check_text(domains, identity=identity, verbose=args.verbose, style=style))
-        return 3 if apply_check_has_conflicts(domains) else 0
-    print(render_apply_preflight_text(domains, identity=identity, verbose=args.verbose, style=style))
-    partial = _resolve_platform_actions(plans, interactive=sys.stdin.isatty(), style=style)
-    outcomes = []
-    failures: list[tuple[str, DotfilesError]] = []
-    if "system" not in preflight_errors:
-        try:
-            outcomes.append(activate_system_store(runner, stores["system"], identity))
-        except DotfilesError as error:
-            failures.append(("system", error))
-    for platform in PLATFORMS:
-        if platform in preflight_errors:
-            continue
-        try:
-            outcomes.append(activate_platform(runner, plans[platform][1]))
-        except DotfilesError as error:
-            failures.append((platform, error))
-    activation_report = render_activation_results_text(
-        outcomes,
-        [(domain, error.message) for domain, error in failures],
-        style=style,
-    )
-    if activation_report:
-        print(activation_report)
-    doctor_failed = False
-    updated_platforms = {outcome.domain for outcome in outcomes if outcome.domain in PLATFORMS}
-    for platform in PLATFORMS:
-        if platform in updated_platforms:
-            doctor_failed = (
-                _cmd_doctor(
-                    argparse.Namespace(platform=platform, json_output=False, verbose=False)
-                )
-                != 0
-                or doctor_failed
-            )
-    if failures:
-        raise failures[0][1]
-    if partial or preflight_errors:
-        return 3
-    if doctor_failed:
-        return 6
-    return 0
+    repository = find_repository(Path.cwd())
+    return ApplySession(runner, reporter, options).run(repository)
 
 
 def _not_deployed(domain: str, staged: bool = False) -> Diagnostic:
@@ -542,7 +288,12 @@ def _cmd_rollback(runner: SubprocessRunner) -> int:
     number, target = select_previous_system_generation(current)
     manifest = read_manifest(system_manifest_path(target))
     assert_identity(identity, manifest)
-    _system_preflight(identity, manifest, other_active_manifests(identity, "system"))
+    old_store = current_system_store()
+    active_path = system_manifest_path(old_store)
+    active = read_manifest(active_path) if active_path.is_file() else None
+    if active is not None:
+        assert_identity(identity, active)
+    preflight_platform(manifest, active, other_active_manifests(identity, "system"))
     answer = input(
         format_rollback_prompt(
             current=current,

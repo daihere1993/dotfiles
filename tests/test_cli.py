@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dotfiles_cli.cli import _resolve_platform_actions, main
+from dotfiles_cli.apply_flow import resolve_platform_actions
+from dotfiles_cli.cli import main
 from dotfiles_cli.errors import ValidationError
 from dotfiles_cli.models import (
     ActivationPlan,
@@ -54,7 +55,7 @@ class ConflictPromptTests(unittest.TestCase):
             root = Path(temporary)
             plans = {platform: self._entry(root, platform) for platform in ("codex", "claude")}
             with patch("builtins.input", return_value="a") as prompt:
-                partial = _resolve_platform_actions(plans, interactive=True)
+                partial = resolve_platform_actions(plans, interactive=True)
             self.assertFalse(partial)
             self.assertEqual(prompt.call_count, 1)
             for _, plan in plans.values():
@@ -63,7 +64,7 @@ class ConflictPromptTests(unittest.TestCase):
     def test_noninteractive_conflicts_default_to_skip(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             plans = {"codex": self._entry(Path(temporary), "codex")}
-            partial = _resolve_platform_actions(plans, interactive=False)
+            partial = resolve_platform_actions(plans, interactive=False)
             self.assertTrue(partial)
             self.assertEqual(
                 plans["codex"][1].actions[0].decision,

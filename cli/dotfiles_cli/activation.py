@@ -5,6 +5,7 @@ import re
 import shutil
 import stat
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from .models import (
     ResourceAction,
     ResourceDecision,
 )
+from .apply_events import ActivationMilestone
 from .nix import CommandRunner
 from .state import (
     atomic_write,
@@ -386,7 +388,22 @@ def _receipt_for_plan(plan: ActivationPlan, backup_refs: dict[str, str]) -> Acti
     )
 
 
-def activate_platform(runner: CommandRunner, plan: ActivationPlan) -> DomainResult:
+ActivationMilestoneCallback = Callable[[str, ActivationMilestone], None]
+
+
+def _emit_milestone(
+    callback: ActivationMilestoneCallback | None, domain: str, milestone: ActivationMilestone
+) -> None:
+    if callback is not None:
+        callback(domain, milestone)
+
+
+def activate_platform(
+    runner: CommandRunner,
+    plan: ActivationPlan,
+    *,
+    on_milestone: ActivationMilestoneCallback | None = None,
+) -> DomainResult:
     desired = plan.desired_manifest
     assert_identity(plan.identity, desired)
     if desired.deployment_domain != plan.platform:
@@ -461,10 +478,13 @@ def activate_platform(runner: CommandRunner, plan: ActivationPlan) -> DomainResu
     try:
         for action in actions:
             if action.decision == ResourceDecision.OVERWRITE:
+                _emit_milestone(on_milestone, plan.platform, ActivationMilestone.BACKUP_OVERWRITES)
                 backup_refs[action.resource.id] = _create_backup(plan, action)
+        _emit_milestone(on_milestone, plan.platform, ActivationMilestone.SWITCH_PROFILE)
         _set_profile(runner, profile, new_store)
         if profile.resolve(strict=True) not in {new_store_resolved, old_store_resolved} - {None}:
             raise ActivationError("profile resolved to neither the old nor new bundle")
+        _emit_milestone(on_milestone, plan.platform, ActivationMilestone.INSTALL_SYMLINKS)
         for action in actions:
             resource = action.resource
             target = Path(resource.target)
@@ -502,6 +522,7 @@ def activate_platform(runner: CommandRunner, plan: ActivationPlan) -> DomainResu
                     raise ActivationError(f"retired target is no longer managed: {target}")
                 os.replace(payload, target)
                 restored.append((action, action.backup_ref or ""))
+        _emit_milestone(on_milestone, plan.platform, ActivationMilestone.VERIFY_RESOURCES)
         failures = [
             action.resource.target
             for action in actions
@@ -521,6 +542,7 @@ def activate_platform(runner: CommandRunner, plan: ActivationPlan) -> DomainResu
                     f"skipped target changed during activation: {action.resource.target}"
                 )
         receipt = _receipt_for_plan(plan, backup_refs)
+        _emit_milestone(on_milestone, plan.platform, ActivationMilestone.WRITE_RECEIPT)
         write_receipt(receipt)
         skipped = sum(action.decision == ResourceDecision.SKIP for action in actions)
         status = "PARTIAL_UPDATED" if skipped else "UPDATED"
@@ -738,6 +760,7 @@ def activate_system_store(
     *,
     current_link: Path = Path("/run/current-system"),
     profile: Path = Path("/nix/var/nix/profiles/system"),
+    on_milestone: ActivationMilestoneCallback | None = None,
 ) -> DomainResult:
     desired = read_manifest(system_manifest_path(target))
     assert_identity(identity, desired)
@@ -752,6 +775,7 @@ def activate_system_store(
     results = preflight_platform(desired, active)
     migration = _migrate_ssh_config(identity, results)
     if migration is not None:
+        _emit_milestone(on_milestone, "system", ActivationMilestone.MIGRATE_SSH)
         try:
             preflight_platform(desired, active)
         except Exception:
@@ -766,6 +790,7 @@ def activate_system_store(
     generation: int | None = None
     profile_changed = False
     try:
+        _emit_milestone(on_milestone, "system", ActivationMilestone.SWITCH_PROFILE)
         runner.run(["sudo", "nix-env", "--profile", str(profile), "--set", str(target)])
         profile_changed = True
         after = _generation_numbers(
@@ -779,7 +804,9 @@ def activate_system_store(
                 f"could not identify the new system generation: {sorted(created)}"
             )
         generation = created.pop() if created else None
+        _emit_milestone(on_milestone, "system", ActivationMilestone.RUN_ACTIVATE_SCRIPT)
         runner.run(["sudo", str(target / "activate")])
+        _emit_milestone(on_milestone, "system", ActivationMilestone.VERIFY_CURRENT_SYSTEM)
         if current_system_store(current_link) != target.resolve(strict=True):
             raise ActivationError("/run/current-system did not switch to the target closure")
         diagnostics = diagnose_manifest(identity, desired)
