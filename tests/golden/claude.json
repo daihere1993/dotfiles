@@ -1,7 +1,7 @@
 [
-  {"path": "CLAUDE.md", "sha256": "5485b13421c0014da3462e0228f1842f50a9c63df327551b19a08c6ec0ae5595", "type": "file"},
+  {"path": "CLAUDE.md", "sha256": "95832df16ffd0f0e3394b435c6612e24168f4855829a8f727e8d2a4a252225f2", "type": "file"},
   {"path": "share", "type": "directory"},
   {"path": "share/dotfiles", "type": "directory"},
-  {"path": "share/dotfiles/manifest.json", "sha256": "339e2558859297d06a27e22b8ea6f21f10f979151a726dac3d0c6407f84efa78", "type": "file"},
+  {"path": "share/dotfiles/manifest.json", "sha256": "f8359ac7d581bfec1bbe21dfe6a0999f6cc8ae81ce2a80a31873547db2dcb5fc", "type": "file"},
   {"path": "skills", "type": "directory"}
 ]
