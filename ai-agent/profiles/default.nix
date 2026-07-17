@@ -1,14 +1,14 @@
 {
   codex = [
-    "local:commit-skill"
+    "local:commit-code"
     "external:superpowers/brainstorming"
   ];
   claude = [
-    "local:commit-skill"
+    "local:commit-code"
     "external:superpowers/brainstorming"
   ];
   cursor = [
-    "local:commit-skill"
+    "local:commit-code"
     "external:superpowers/brainstorming"
   ];
 }

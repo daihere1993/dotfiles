@@ -1,4 +1,4 @@
-# Commit Skill Core
+# Commit Code Core
 
 Use this core spec when the task is to turn working-tree changes into one or more clean commits.
 
@@ -94,4 +94,3 @@ Examples:
 
 - `scripts/commit.sh --dry-run -m "fix(api): handle missing auth token"`
 - `scripts/commit.sh -m "refactor(ui): split table toolbar into hooks"`
-

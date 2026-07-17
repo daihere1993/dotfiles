@@ -320,18 +320,18 @@ class ActivationTests(unittest.TestCase):
 
     def test_skip_conflicting_skill_still_deploys_rules_and_can_repeat(self) -> None:
         repository = Path(__file__).resolve().parents[1]
-        source = repository / "ai-agent/skills/commit-skill"
+        source = repository / "ai-agent/skills/commit-code"
         skill = SkillSource(
-            "local:commit-skill",
-            "commit-skill",
+            "local:commit-code",
+            "commit-code",
             source,
             "local",
-            "ai-agent/skills/commit-skill",
+            "ai-agent/skills/commit-code",
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             identity = MachineIdentity("alice", str(root / "home"))
-            conflict = identity.home / ".agents/skills/commit-skill"
+            conflict = identity.home / ".agents/skills/commit-code"
             conflict.mkdir(parents=True)
             marker = conflict / "manual"
             marker.write_text("keep")
@@ -416,18 +416,18 @@ class ActivationTests(unittest.TestCase):
 
     def test_overwrite_conflicting_skill_creates_backup(self) -> None:
         repository = Path(__file__).resolve().parents[1]
-        source = repository / "ai-agent/skills/commit-skill"
+        source = repository / "ai-agent/skills/commit-code"
         skill = SkillSource(
-            "local:commit-skill",
-            "commit-skill",
+            "local:commit-code",
+            "commit-code",
             source,
             "local",
-            "ai-agent/skills/commit-skill",
+            "ai-agent/skills/commit-code",
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             identity = MachineIdentity("alice", str(root / "home"))
-            target = identity.home / ".agents/skills/commit-skill"
+            target = identity.home / ".agents/skills/commit-code"
             target.mkdir(parents=True)
             (target / "manual").write_text("preserved")
             bundle = root / "bundle"
@@ -441,7 +441,7 @@ class ActivationTests(unittest.TestCase):
             )
             results = preflight_platform(manifest, None, resource_level=True)
             skill_result = next(
-                result for result in results if result.resource.id.endswith("commit-skill")
+                result for result in results if result.resource.id.endswith("commit-code")
             )
             actions = make_resource_actions(results, manifest, None, {skill_result.resource.id})
             activate_platform(
@@ -506,18 +506,18 @@ class ActivationTests(unittest.TestCase):
 
     def test_failed_overwrite_restores_user_skill_and_old_state(self) -> None:
         repository = Path(__file__).resolve().parents[1]
-        source = repository / "ai-agent/skills/commit-skill"
+        source = repository / "ai-agent/skills/commit-code"
         skill = SkillSource(
-            "local:commit-skill",
-            "commit-skill",
+            "local:commit-code",
+            "commit-code",
             source,
             "local",
-            "ai-agent/skills/commit-skill",
+            "ai-agent/skills/commit-code",
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             identity = MachineIdentity("alice", str(root / "home"))
-            target = identity.home / ".agents/skills/commit-skill"
+            target = identity.home / ".agents/skills/commit-code"
             target.mkdir(parents=True)
             marker = target / "manual"
             marker.write_text("restore-me")
@@ -537,7 +537,7 @@ class ActivationTests(unittest.TestCase):
             )
             results = preflight_platform(broken, None, resource_level=True)
             skill_result = next(
-                result for result in results if result.resource.id.endswith("commit-skill")
+                result for result in results if result.resource.id.endswith("commit-code")
             )
             actions = make_resource_actions(results, broken, None, {skill_result.resource.id})
             with self.assertRaises(ActivationError) as caught:
