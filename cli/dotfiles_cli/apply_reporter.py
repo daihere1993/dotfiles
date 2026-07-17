@@ -12,11 +12,10 @@ from .apply_events import (
     ChangeEntry,
     ChangeVerb,
 )
-from .models import Diagnostic, DomainResult, MachineIdentity, PLATFORMS
+from .models import PLATFORMS, Diagnostic, DomainResult, MachineIdentity
 from .present import (
     Style,
     _section_title,
-    humanize_diagnostic_reason,
     render_apply_check_json,
     render_changes_plan,
     shorten_store_path,
@@ -164,10 +163,12 @@ class TextApplyReporter:
             for item in event.payload.get("entries", [])
         ]
         domain_order = event.payload.get("domainOrder", ["system", *PLATFORMS])
+        domain_actions = event.payload.get("domainActions", [])
         body = render_changes_plan(
             entries,
             identity=self.identity,
             domain_order=domain_order,
+            domain_actions=domain_actions,
             verbose=self.verbose,
             style=self.style,
         )
@@ -255,7 +256,8 @@ class TextApplyReporter:
         else:
             color = self.style.yellow
         self._write("")
-        self._write(color(f"Result: {event.payload.get('resultMessage', 'complete')} (exit {exit_code})"))
+        message = event.payload.get("resultMessage", "complete")
+        self._write(color(f"Result: {message} (exit {exit_code})"))
 
     def _on_check_json(self, event: ApplyEvent) -> None:
         domains = event.payload["domains"]
@@ -320,7 +322,7 @@ def build_result_lines(
             marker = style.yellow("!")
             label = outcome.status.lower()
         lines.append(f"  {marker} {outcome.domain:<7} {label}")
-    for domain, message in failures:
+    for domain, _message in failures:
         seen.add(domain)
         lines.append(f"  {style.red('✗')} {domain:<7} failed")
     for domain in skipped_domains:

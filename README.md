@@ -32,9 +32,9 @@ dot doctor --json
 dot rollback
 ```
 
-`dot apply` runs in phases: Plan, Build, Preflight, Changes, optional conflict resolution, confirmation, Apply, Verification, and Result. Progress is shown per deployment domain instead of waiting for a final summary. In an interactive terminal, `dot apply` asks `Apply? [y/N]` after conflicts are resolved; use `-y` to skip that prompt in scripts or bootstrap.
+`dot apply` runs in phases: Plan, Build, Preflight, Changes, optional conflict resolution, confirmation, Apply, Verification, and Result. Progress is shown per deployment domain instead of waiting for a final summary. In an interactive terminal, `dot apply` asks `Apply? [y/N]` after conflicts are resolved. A non-interactive apply with changes refuses to modify state unless `-y` is supplied.
 
-`dot apply --check` stops after the Changes plan without modifying state. `--verbose` shows every resource in the Changes plan and streams Nix build output. `--json-events` emits one NDJSON event per line for automation.
+`dot apply --check` stops after the Changes plan without modifying state. The plan distinguishes resource content changes from platform generation changes: a new bundle Store path alone is a no-op, while provenance-only changes switch metadata without counting unchanged resources as updates. `--verbose` shows unchanged resources carried into a new generation and streams Nix build output. `--json-events` emits one NDJSON event per line for automation, including a stable `domainActions` list.
 
 `dot apply --platform <platform>` builds and switches only that Agent profile. Agent resources are applied independently, so a conflicting skill does not block rules or other skills. A full apply resolves every conflict before making the first change, then continues in system, Codex, Claude, and Cursor order.
 
@@ -63,7 +63,7 @@ Doctor checks only their file type, owner, and write permissions.
 
 Edit shared rules in `ai-agent/rules/common.md` and platform additions in `ai-agent/rules/agents/`. Run `dot validate` and `dot apply` after every change; generated files are read-only Nix Store artifacts.
 
-Dotfiles owns individual entries below each platform's skills directory, not the directory itself. Unrelated manual skills remain untouched. In an interactive terminal, an unmanaged skill with the same target ID can be backed up and overwritten or skipped. Non-interactive apply defaults to skip. Empty, safely permissioned rules files may be adopted automatically; non-empty rules files are skipped without being overwritten.
+Dotfiles owns individual entries below each platform's skills directory, not the directory itself. Unrelated manual skills remain untouched. In an interactive terminal, an unmanaged skill with the same target ID can be backed up and overwritten or skipped. An explicitly authorized non-interactive apply defaults eligible conflicts to skip. Empty, safely permissioned rules files may be adopted automatically; non-empty rules files are skipped without being overwritten.
 
 A local skill lives at `ai-agent/skills/<skill-id>/` and must include a `SKILL.md` whose frontmatter name equals the directory name. Select it explicitly in `ai-agent/profiles/default.nix` as `local:<skill-id>`.
 

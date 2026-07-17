@@ -8,7 +8,6 @@ from dotfiles_cli.errors import ConflictError
 from dotfiles_cli.models import (
     ConflictResult,
     ConflictStatus,
-    DeploymentManifest,
     Diagnostic,
     DiagnosticStatus,
     MachineIdentity,
@@ -64,7 +63,6 @@ class PresentTests(unittest.TestCase):
             store_path="/nix/store/demo",
             directory_sha256="digest",
         )
-        manifest = DeploymentManifest(identity, "codex", (resource,), ())
         domains = [
             DomainPreflight(
                 domain="codex",
@@ -87,7 +85,6 @@ class PresentTests(unittest.TestCase):
 
     def test_render_apply_check_text_shows_blocked_domain(self) -> None:
         identity = MachineIdentity("alice", "/Users/alice")
-        manifest = DeploymentManifest(identity, "system", (), ())
         error = ConflictError(
             "platform preflight found conflicts:\n"
             "/Users/alice/.ssh/config: existing target cannot be proven to belong "
@@ -134,11 +131,23 @@ class PresentTests(unittest.TestCase):
                 ),
             )
         ]
-        payload = json.loads(render_apply_check_json(domains, identity=identity))
+        domain_actions = [
+            {
+                "domain": "codex",
+                "action": "install",
+                "reason": "domain is not deployed",
+            }
+        ]
+        payload = json.loads(
+            render_apply_check_json(
+                domains, identity=identity, domain_actions=domain_actions
+            )
+        )
         self.assertEqual(payload["schemaVersion"], 2)
         self.assertEqual(payload["summary"]["blocked"], ["codex"])
         self.assertEqual(payload["summary"]["exitCode"], 3)
         self.assertIn("phases", payload)
+        self.assertEqual(payload["domainActions"], domain_actions)
         self.assertEqual(
             payload["blocked"]["codex"]["conflicts"][0]["reason"],
             "user-owned skill (can overwrite)",

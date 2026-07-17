@@ -99,13 +99,38 @@
             }
           ];
         };
-      mkAgentBundle = { identityJson, platform }:
+      mkAgentBundle =
+        { identityJson
+        , platform
+        , commonRule ? builtins.path {
+            path = ./ai-agent/rules/common.md;
+            name = "dotfiles-common-rules.md";
+          }
+        , platformRule ? builtins.path {
+            path = ./. + "/ai-agent/rules/agents/${platform}.md";
+            name = "dotfiles-${platform}-rules.md";
+          }
+        }:
         let
           identity = parseIdentity identityJson;
           selected = profiles.${platform} or (throw "unknown platform ${platform}");
+          localSkillSpec = canonicalId:
+            let
+              targetId = pkgs.lib.removePrefix "local:" canonicalId;
+              sourcePath = "ai-agent/skills/${targetId}";
+            in
+            {
+              inherit targetId sourcePath;
+              canonicalId = canonicalId;
+              path = toString (builtins.path {
+                path = ./. + "/${sourcePath}";
+                name = "dotfiles-skill-${targetId}";
+              });
+              sourceKind = "local";
+            };
           skillArgument = canonicalId:
             if pkgs.lib.hasPrefix "local:" canonicalId then
-              "--skill ${pkgs.lib.escapeShellArg canonicalId}"
+              "--skill-spec ${pkgs.lib.escapeShellArg (builtins.toJSON (localSkillSpec canonicalId))}"
             else if pkgs.lib.hasPrefix "external:" canonicalId then
               let
                 key = pkgs.lib.removePrefix "external:" canonicalId;
@@ -113,6 +138,18 @@
               in
               "--skill-spec ${pkgs.lib.escapeShellArg (builtins.toJSON spec)}"
             else throw "invalid canonical skill ID ${canonicalId}";
+          ruleSpecs = if platform == "cursor" then [ ] else [
+            {
+              sourcePath = "ai-agent/rules/common.md";
+              path = toString commonRule;
+            }
+            {
+              sourcePath = "ai-agent/rules/agents/${platform}.md";
+              path = toString platformRule;
+            }
+          ];
+          ruleArgument = spec:
+            "--rule-spec ${pkgs.lib.escapeShellArg (builtins.toJSON spec)}";
         in
         pkgs.runCommand "dotfiles-${platform}-bundle"
           {
@@ -120,11 +157,11 @@
             preferLocalBuild = true;
           } ''
           dot internal-compile \
-            --repository ${self} \
             --platform ${platform} \
             --identity-json '${builtins.toJSON identity}' \
             --artifact-root "$out" \
             --output "$out" \
+            ${builtins.concatStringsSep " " (map ruleArgument ruleSpecs)} \
             ${builtins.concatStringsSep " " (map skillArgument selected)}
         '';
       testIdentity = builtins.toJSON {
@@ -175,6 +212,33 @@
         codex-bundle = mkAgentBundle { identityJson = testIdentity; platform = "codex"; };
         claude-bundle = mkAgentBundle { identityJson = testIdentity; platform = "claude"; };
         cursor-bundle = mkAgentBundle { identityJson = testIdentity; platform = "cursor"; };
+        agent-input-isolation =
+          let
+            alternateCommon = builtins.toFile "alternate-common-rules.md" "alternate\n";
+            defaultCursor = (mkAgentBundle {
+              identityJson = testIdentity;
+              platform = "cursor";
+            }).drvPath;
+            alternateCursor = (mkAgentBundle {
+              identityJson = testIdentity;
+              platform = "cursor";
+              commonRule = alternateCommon;
+            }).drvPath;
+            defaultCodex = (mkAgentBundle {
+              identityJson = testIdentity;
+              platform = "codex";
+            }).drvPath;
+            alternateCodex = (mkAgentBundle {
+              identityJson = testIdentity;
+              platform = "codex";
+              commonRule = alternateCommon;
+            }).drvPath;
+          in
+          assert defaultCursor == alternateCursor;
+          assert defaultCodex != alternateCodex;
+          pkgs.runCommand "dotfiles-agent-input-isolation" { } ''
+            touch $out
+          '';
         python-tests = pkgs.runCommand "dotfiles-python-tests"
           {
             nativeBuildInputs = [ pkgs.python3 ];

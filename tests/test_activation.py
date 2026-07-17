@@ -15,6 +15,7 @@ from dotfiles_cli.activation import (
     make_resource_actions,
     preflight_platform,
     profile_path,
+    reconcile_platform,
     select_previous_system_generation,
 )
 from dotfiles_cli.compiler import SkillSource, compile_platform
@@ -37,7 +38,11 @@ from dotfiles_cli.state import backup_is_valid, read_receipt
 
 
 class ProfileRunner:
+    def __init__(self) -> None:
+        self.commands: list[list[str]] = []
+
     def run(self, command, *, check=True):
+        self.commands.append(list(command))
         if command[0] == "nix-env" and "--set" in command:
             profile = Path(command[command.index("--profile") + 1])
             store = Path(command[command.index("--set") + 1])
@@ -210,6 +215,46 @@ class ActivationTests(unittest.TestCase):
             activate_platform(ProfileRunner(), update)
             self.assertEqual(os.readlink(rules_target), raw_target)
             self.assertEqual(profile.resolve(), bundle_two.resolve())
+
+    def test_platform_reconcile_repairs_entry_without_switching_profile(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            identity = MachineIdentity("alice", str(root / "home"))
+            identity.home.mkdir()
+            bundle = root / "bundle"
+            manifest = compile_platform(
+                repository=repository,
+                platform="codex",
+                identity=identity,
+                output_root=bundle,
+                artifact_root=str(bundle),
+                skills=[],
+            )
+            profile = profile_path(identity, "codex")
+            activate_platform(
+                ProfileRunner(),
+                ActivationPlan("codex", identity, str(profile), str(bundle), manifest),
+            )
+            rules = identity.home / ".codex/AGENTS.md"
+            rules.unlink()
+            runner = ProfileRunner()
+            plan = ActivationPlan(
+                "codex",
+                identity,
+                str(profile),
+                str(root / "unused-new-bundle"),
+                manifest,
+                str(bundle),
+                manifest,
+                old_receipt=read_receipt(identity, "codex"),
+            )
+
+            result = reconcile_platform(runner, plan)
+
+            self.assertEqual(result.status, "UPDATED")
+            self.assertTrue(rules.is_symlink())
+            self.assertEqual(runner.commands, [])
 
     def test_platform_adopts_empty_rules_file_and_preserves_skills_root(self) -> None:
         repository = Path(__file__).resolve().parents[1]

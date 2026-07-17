@@ -727,7 +727,9 @@ dot rollback
 
 #### 12.4.0 Apply UX
 
-`dot apply` 以分阶段输出呈现：Plan、Build、Preflight、Changes、Resolve（如有可交互冲突）、Confirm（交互式 TTY 默认 `Apply? [y/N]`）、Apply、Verification、Result。`dot apply --check` 在 Changes 后停止，不 resolve、不 confirm、不 activate。`dot apply -y` 跳过最终确认，供 bootstrap 和非交互脚本使用。`--verbose` 展示全部 resource 并透传 Nix build 日志；`--json-events` 输出 NDJSON 事件流。上述输出阶段不改变 §12.4.1–12.4.3 的安全协议。
+`dot apply` 以分阶段输出呈现：Plan、Build、Preflight、Changes、Resolve（如有可交互冲突）、Confirm（交互式 TTY 默认 `Apply? [y/N]`）、Apply、Verification、Result。`dot apply --check` 在 Changes 后停止，不 resolve、不 confirm、不 activate。非 TTY 且存在 state-changing domain action 时，未传 `-y` 必须在输出最终计划后以 exit 2 停止，且不得修改状态。`dot apply -y` 是非交互 mutation 的显式授权。`--verbose` 展示全部 resource 并透传 Nix build 日志；`--json-events` 输出 NDJSON 事件流。上述输出阶段不改变 §12.4.1–12.4.3 的安全协议。
+
+Apply 必须先生成唯一的 deployment plan。Resource ownership classification 继续按 active manifest 的 raw link、resolved Store path 和 hash 严格验证；resource delta 则比较稳定入口语义和内容 hash，不把 generation 特有的 Store 前缀算作内容变化。`sources`、external revision、narHash 和 skill inventory 的单独变化属于 metadata update。Domain action 固定为 `noop`、`install`、`reconcile`、`switch_content`、`switch_metadata` 或 `blocked`，Changes 文本、JSON、确认和 activation 必须消费同一计划。`--json` 和 `--json-events` 的 Changes payload 包含稳定的 `domainActions`。
 
 #### 12.4.1 单 Agent platform apply
 
@@ -746,11 +748,13 @@ cursor
 Platform apply 执行与对应 `--check` 相同的 build 和 preflight，然后：
 
 1. 记录 apply 前的部署状态（`DEPLOYED`、`STAGED_NOT_DEPLOYED` 或 `NOT_DEPLOYED`）和旧 Store bundle。
-2. 使用固定 profile switch 原语设置为目标 Store bundle。
-3. 首次部署时创建固定入口 symlinks；后续 apply 不改写健康的入口 symlinks，只补回 active manifest 已声明但当前缺失的入口。
+2. `install`、`switch_content` 和 `switch_metadata` 使用固定 profile switch 原语设置为目标 Store bundle；`noop` 不执行任何 activation mutation。
+3. `reconcile` 只依据 active manifest 补回缺失入口和修复 receipt，不执行 profile switch。首次部署时创建固定入口 symlinks；后续 generation switch 不改写健康的入口 symlinks。
 4. 验证 profile、全部入口 symlinks、rules hash、skills directory hash 和 platform manifest。
 
 Profile switch 必须表现为“旧 bundle”或“新 bundle”二选一；命令结束后解析到其他状态视为失败。
+
+Agent desired manifest 在忽略 generation-specific Store path 后与 active manifest 完全相同时为 `noop`，即使构建产生了不同 Store bundle。只有 provenance metadata 变化时为 `switch_metadata`。System domain 以 closure Store identity 决定是否切换；当前 closure 已等于 desired closure 且资源健康时必须为 `noop`，不得调用 sudo 或创建重复 generation。
 
 如果切换后验证失败：
 

@@ -16,7 +16,10 @@ from .activation import (
     select_previous_system_generation,
     system_manifest_path,
 )
+from .apply_flow import ApplyOptions, ApplySession
+from .apply_reporter import build_reporter
 from .compiler import (
+    RuleSource,
     SkillSource,
     compile_platform,
     discover_local_skills,
@@ -25,7 +28,7 @@ from .compiler import (
     validate_static_contracts,
 )
 from .doctor import diagnose_manifest, diagnostics_healthy
-from .errors import ConflictError, DotfilesError, ValidationError
+from .errors import DotfilesError, ValidationError
 from .machine import (
     default_state_path,
     discover_identity,
@@ -47,8 +50,6 @@ from .nix import (
     find_repository,
     read_agent_config,
 )
-from .apply_flow import ApplyOptions, ApplySession
-from .apply_reporter import build_reporter
 from .present import (
     Style,
     format_rollback_prompt,
@@ -82,7 +83,10 @@ def _parser() -> argparse.ArgumentParser:
         "--verbose", action="store_true", help="show every resource during preflight output"
     )
     apply_parser.add_argument(
-        "--json", action="store_true", dest="json_output", help="emit machine-readable preflight JSON"
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="emit machine-readable preflight JSON",
     )
     apply_parser.add_argument(
         "--json-events",
@@ -110,13 +114,14 @@ def _parser() -> argparse.ArgumentParser:
 def _internal_parser() -> argparse.ArgumentParser:
     internal = argparse.ArgumentParser(prog="dot internal-compile", add_help=False)
     internal.set_defaults(command="internal-compile")
-    internal.add_argument("--repository", type=Path, required=True)
+    internal.add_argument("--repository", type=Path)
     internal.add_argument("--platform", choices=PLATFORMS, required=True)
     internal.add_argument("--identity-json", required=True)
     internal.add_argument("--artifact-root", required=True)
     internal.add_argument("--output", type=Path, required=True)
     internal.add_argument("--skill", action="append", default=[])
     internal.add_argument("--skill-spec", action="append", default=[])
+    internal.add_argument("--rule-spec", action="append", default=[])
     return internal
 
 
@@ -324,10 +329,19 @@ def _skill_from_spec(value: str) -> SkillSource:
     )
 
 
+def _rule_from_spec(value: str) -> RuleSource:
+    spec = json.loads(value)
+    return RuleSource(source_path=spec["sourcePath"], path=Path(spec["path"]))
+
+
 def _cmd_internal_compile(args: argparse.Namespace) -> int:
     identity = MachineIdentity.from_dict(json.loads(args.identity_json))
     validate_identity(identity)
-    available = discover_local_skills(args.repository / "ai-agent/skills")
+    available = (
+        discover_local_skills(args.repository / "ai-agent/skills")
+        if args.repository is not None
+        else {}
+    )
     selected: list[SkillSource] = []
     for canonical_id in args.skill:
         try:
@@ -337,6 +351,7 @@ def _cmd_internal_compile(args: argparse.Namespace) -> int:
                 f"profile references unknown local skill: {canonical_id}"
             ) from error
     selected.extend(_skill_from_spec(value) for value in args.skill_spec)
+    rules = [_rule_from_spec(value) for value in args.rule_spec] or None
     compile_platform(
         repository=args.repository,
         platform=args.platform,
@@ -344,6 +359,7 @@ def _cmd_internal_compile(args: argparse.Namespace) -> int:
         output_root=args.output,
         artifact_root=args.artifact_root,
         skills=selected,
+        rules=rules,
     )
     return 0
 

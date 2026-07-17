@@ -15,6 +15,7 @@ from .activation import (
     other_active_manifests,
     preflight_platform,
     profile_path,
+    reconcile_platform,
     system_manifest_path,
 )
 from .apply_events import (
@@ -23,8 +24,6 @@ from .apply_events import (
     ApplyPhase,
     ChangeEntry,
     ChangeVerb,
-    build_changes_plan,
-    change_count,
 )
 from .apply_reporter import ApplyReporter, build_result_lines, build_verify_summary
 from .errors import ConflictError, DotfilesError, ValidationError
@@ -44,6 +43,14 @@ from .models import (
     ResourceDecision,
 )
 from .nix import CommandRunner, archive_repository, build_domain, reject_concurrent_apply
+from .planning import (
+    DeploymentPlan,
+    DomainAction,
+    build_deployment_plan,
+    build_plan_changes,
+    plan_domain,
+    serialize_domain_actions,
+)
 from .present import (
     Style,
     apply_check_has_conflicts,
@@ -301,13 +308,17 @@ class ApplySession:
     def _emit(self, phase: ApplyPhase, kind: str, **payload) -> None:
         self.reporter.emit(ApplyEvent(phase=phase, kind=kind, payload=payload))
 
-    def _emit_changes(self, domains, plans, entries: list[ChangeEntry]) -> None:
+    def _emit_changes(self, deployment: DeploymentPlan, entries: list[ChangeEntry]) -> None:
+        domain_actions = serialize_domain_actions(deployment)
         self._emit(
             ApplyPhase.CHANGES,
             "changes_rendered",
             entries=_serialize_entries(entries),
             domainOrder=list(_domain_list(self.options)),
-            summary=render_changes_summary(entries, style=self.style),
+            domainActions=domain_actions,
+            summary=render_changes_summary(
+                entries, domain_actions=domain_actions, style=self.style
+            ),
         )
 
     def run(self, repository: Path) -> int:
@@ -372,6 +383,7 @@ class ApplySession:
 
         plans: dict[str, tuple[list[ConflictResult], ActivationPlan | None]] = {}
         preflight_errors: dict[str, ConflictError] = {}
+        planned_domains = []
 
         if self.options.platform:
             platform = self.options.platform
@@ -401,10 +413,23 @@ class ApplySession:
                     old_receipt=receipt,
                 ),
             )
+            planned_domains.append(
+                plan_domain(
+                    platform,
+                    desired_store=stores[platform],
+                    desired=manifests[platform],
+                    active_store=old_store,
+                    active=active,
+                    safety=results,
+                    blocked=platform in preflight_errors,
+                )
+            )
         else:
             system_others = [manifests[platform] for platform in PLATFORMS]
+            system_old_store = None
+            system_active = None
             try:
-                _, _, system_results = _system_preflight(
+                system_old_store, system_active, system_results = _system_preflight(
                     identity, manifests["system"], system_others
                 )
                 self._emit_preflight("system", system_results, error=None)
@@ -413,6 +438,18 @@ class ApplySession:
                 preflight_errors["system"] = error
                 self._emit_preflight("system", [], error=error)
                 plans["system"] = ([], None)
+                system_results = []
+            planned_domains.append(
+                plan_domain(
+                    "system",
+                    desired_store=stores["system"],
+                    desired=manifests["system"],
+                    active_store=system_old_store,
+                    active=system_active,
+                    safety=system_results,
+                    blocked="system" in preflight_errors,
+                )
+            )
 
             for platform in PLATFORMS:
                 _, old_store, active = current_platform(identity, platform)
@@ -441,6 +478,19 @@ class ApplySession:
                         old_receipt=receipt,
                     ),
                 )
+                planned_domains.append(
+                    plan_domain(
+                        platform,
+                        desired_store=stores[platform],
+                        desired=manifests[platform],
+                        active_store=old_store,
+                        active=active,
+                        safety=results,
+                        blocked=platform in preflight_errors,
+                    )
+                )
+
+        deployment = build_deployment_plan(planned_domains)
 
         domain_report = build_apply_check_report(
             identity=identity,
@@ -449,14 +499,10 @@ class ApplySession:
             plans=plans,
             preflight_errors=preflight_errors,
         )
-        entries = build_changes_plan(
-            domains=domain_report,
-            plans=plans,
-            verbose=self.options.verbose,
-        )
-        self._emit_changes(domain_report, plans, entries)
+        entries = build_plan_changes(deployment, plans, verbose=self.options.verbose)
 
         if self.options.check:
+            self._emit_changes(deployment, entries)
             if self.options.json_output:
                 from .present import render_apply_check_json
 
@@ -465,6 +511,7 @@ class ApplySession:
                         domain_report,
                         identity=identity,
                         changes=entries,
+                        domain_actions=serialize_domain_actions(deployment),
                     )
                 )
             else:
@@ -477,29 +524,33 @@ class ApplySession:
                 )
             return 3 if apply_check_has_conflicts(domain_report) else 0
 
-        if apply_check_has_conflicts(domain_report):
-            blocked = any(entry.verb == ChangeVerb.BLOCKED for entry in entries)
-            if blocked:
-                self._emit_result(exit_code=3, result_message="conflicts found")
-                return 3
+        if any(domain.action == DomainAction.BLOCKED for domain in deployment.domains):
+            self._emit_changes(deployment, entries)
+            self._emit_result(exit_code=3, result_message="conflicts found")
+            return 3
 
         partial = resolve_platform_actions(
             plans, interactive=sys.stdin.isatty(), style=self.style, reporter=self.reporter
         )
-        entries = build_changes_plan(
-            domains=domain_report,
-            plans=plans,
-            verbose=self.options.verbose,
-        )
-        self._emit_changes(domain_report, plans, entries)
+        entries = build_plan_changes(deployment, plans, verbose=self.options.verbose)
+        self._emit_changes(deployment, entries)
 
         if any(entry.verb in {ChangeVerb.BLOCKED, ChangeVerb.CONFLICT} for entry in entries):
             self._emit_result(exit_code=3, result_message="conflicts remain")
             return 3
 
-        if change_count(entries) == 0 and not partial:
+        if not deployment.changes_state and not partial:
             self._emit_result(exit_code=0, result_message="no changes needed")
             return 0
+
+        if not self.options.yes and not sys.stdin.isatty():
+            raise ValidationError(
+                "non-interactive apply requires `--yes`",
+                next_step=(
+                    "Run `dot apply --check` to inspect the plan or retry with "
+                    "`dot apply --yes`."
+                ),
+            )
 
         if not self._confirm_apply():
             self._emit(ApplyPhase.CONFIRM, "confirm_cancelled")
@@ -512,7 +563,7 @@ class ApplySession:
             plans=plans,
             preflight_errors=preflight_errors,
             partial=partial,
-            entries=entries,
+            deployment=deployment,
         )
 
     def _emit_preflight(
@@ -545,7 +596,7 @@ class ApplySession:
         if self.options.yes or self.options.check:
             return True
         if not sys.stdin.isatty():
-            return True
+            return False
         self._emit(ApplyPhase.CONFIRM, "confirm_prompt", prompt="Apply? [y/N] ")
         try:
             answer = input().strip().lower()
@@ -574,32 +625,6 @@ class ApplySession:
             message=_humanize_activation_message(outcome.message),
         )
 
-    def _domain_needs_activation(
-        self,
-        domain: str,
-        plans: dict,
-        preflight_errors: dict[str, ConflictError],
-        entries: list[ChangeEntry],
-    ) -> bool:
-        if domain in preflight_errors:
-            return False
-        domain_entries = [entry for entry in entries if entry.domain == domain]
-        if domain == "system":
-            if not domain_entries:
-                return True
-        elif not domain_entries:
-            return False
-        return any(
-            entry.verb
-            not in {
-                ChangeVerb.OK,
-                ChangeVerb.BLOCKED,
-                ChangeVerb.CONFLICT,
-                ChangeVerb.SKIP,
-            }
-            for entry in domain_entries
-        )
-
     def _activate_all(
         self,
         *,
@@ -608,7 +633,7 @@ class ApplySession:
         plans: dict,
         preflight_errors: dict[str, ConflictError],
         partial: bool,
-        entries: list[ChangeEntry],
+        deployment: DeploymentPlan,
     ) -> int:
         outcomes: list[DomainResult] = []
         failures: list[tuple[str, DotfilesError]] = []
@@ -616,7 +641,8 @@ class ApplySession:
         activation_order = list(_domain_list(self.options))
 
         for domain in activation_order:
-            if not self._domain_needs_activation(domain, plans, preflight_errors, entries):
+            domain_plan = deployment.for_domain(domain)
+            if not domain_plan.changes_state:
                 if domain not in preflight_errors:
                     skipped_domains.append(domain)
                     self._activation_callback(domain, ActivationMilestone.DOMAIN_SKIPPED)
@@ -632,11 +658,18 @@ class ApplySession:
                 else:
                     _, plan = plans[domain]
                     assert plan is not None
-                    outcome = activate_platform(
-                        self.runner,
-                        plan,
-                        on_milestone=self._activation_callback,
-                    )
+                    if domain_plan.action == DomainAction.RECONCILE:
+                        outcome = reconcile_platform(
+                            self.runner,
+                            plan,
+                            on_milestone=self._activation_callback,
+                        )
+                    else:
+                        outcome = activate_platform(
+                            self.runner,
+                            plan,
+                            on_milestone=self._activation_callback,
+                        )
                 outcomes.append(outcome)
                 self._emit_activation_complete(outcome)
             except DotfilesError as error:

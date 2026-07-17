@@ -30,6 +30,12 @@ class SkillSource:
     rev: str | None = None
 
 
+@dataclass(frozen=True)
+class RuleSource:
+    source_path: str
+    path: Path
+
+
 def _frontmatter(path: Path) -> dict[str, str]:
     try:
         text = path.read_text(encoding="utf-8")
@@ -122,25 +128,39 @@ def validate_external_locks(repository: Path, source_ids: set[str]) -> None:
             raise ValidationError(f"external source {source_id!r} lacks locked.narHash")
 
 
-def compose_rules(repository: Path, paths: list[Path]) -> bytes:
+def compose_rule_sources(sources: list[RuleSource]) -> bytes:
     sections = [PROVENANCE_HEADER]
-    for path in paths:
+    for source in sources:
+        logical = PurePosixPath(source.source_path)
+        if logical.is_absolute() or ".." in logical.parts:
+            raise ValidationError(f"invalid canonical rule source: {source.source_path}")
+        if source.path.is_symlink() or not source.path.is_file():
+            raise ValidationError(f"rule source must be a real file: {source.path}")
         try:
-            content = (repository / path).read_text(encoding="utf-8").strip()
+            content = source.path.read_text(encoding="utf-8").strip()
         except (OSError, UnicodeDecodeError) as error:
-            raise ValidationError(f"cannot read canonical rules {path}: {error}") from error
-        sections.append(f"<!-- Source: {path.as_posix()} -->\n{content}")
+            raise ValidationError(
+                f"cannot read canonical rules {source.source_path}: {error}"
+            ) from error
+        sections.append(f"<!-- Source: {source.source_path} -->\n{content}")
     return ("\n\n".join(sections).rstrip() + "\n").encode()
+
+
+def compose_rules(repository: Path, paths: list[Path]) -> bytes:
+    return compose_rule_sources(
+        [RuleSource(path.as_posix(), repository / path) for path in paths]
+    )
 
 
 def compile_platform(
     *,
-    repository: Path,
+    repository: Path | None,
     platform: str,
     identity: MachineIdentity,
     output_root: Path,
     artifact_root: str,
     skills: list[SkillSource],
+    rules: list[RuleSource] | None = None,
 ) -> DeploymentManifest:
     adapter = get_adapter(platform)
     if output_root.exists() and any(output_root.iterdir()):
@@ -151,12 +171,20 @@ def compile_platform(
     inventory: list[SkillInventoryEntry] = []
 
     if adapter.rules_filename:
-        rule_paths = [Path("ai-agent/rules/common.md")]
-        agent_rule = repository / "ai-agent/rules/agents" / f"{platform}.md"
-        if agent_rule.exists():
-            rule_paths.append(agent_rule.relative_to(repository))
+        if rules is None:
+            if repository is None:
+                raise ValidationError("explicit rule sources are required without a repository")
+            rule_paths = [Path("ai-agent/rules/common.md")]
+            agent_rule = repository / "ai-agent/rules/agents" / f"{platform}.md"
+            if agent_rule.exists():
+                rule_paths.append(agent_rule.relative_to(repository))
+            rules = [
+                RuleSource(path.as_posix(), repository / path) for path in rule_paths
+            ]
+        if not rules:
+            raise ValidationError(f"{platform} requires explicit global rule sources")
         rules_path = output_root / adapter.rules_filename
-        rules_path.write_bytes(compose_rules(repository, rule_paths))
+        rules_path.write_bytes(compose_rule_sources(rules))
         resources.append(
             Resource(
                 id=f"ai-agent.{platform}.global-rules",
@@ -166,9 +194,11 @@ def compile_platform(
                 link_target=str(profile / adapter.rules_filename),
                 store_path=f"{artifact_root}/{adapter.rules_filename}",
                 sha256=file_sha256(rules_path),
-                sources=tuple(path.as_posix() for path in rule_paths),
+                sources=tuple(source.source_path for source in rules),
             )
         )
+    elif rules:
+        raise ValidationError(f"{platform} does not support global rule sources")
 
     skills_root = output_root / "skills"
     skills_root.mkdir()

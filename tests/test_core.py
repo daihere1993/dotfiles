@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from dotfiles_cli.compiler import (
+    RuleSource,
     SkillSource,
     compile_platform,
     validate_external_locks,
@@ -273,6 +274,32 @@ class CoreTests(unittest.TestCase):
             str(self.identity.home / ".agents/skills"),
             {resource.target for resource in manifest.resources},
         )
+
+    def test_compiler_accepts_explicit_rule_sources_without_repository(self) -> None:
+        common = self.root / "common.md"
+        agent = self.root / "codex.md"
+        common.write_text("# Common\n")
+        agent.write_text("# Codex\n")
+        output = self.root / "explicit-bundle"
+
+        manifest = compile_platform(
+            repository=None,
+            platform="codex",
+            identity=self.identity,
+            output_root=output,
+            artifact_root=str(output),
+            skills=[],
+            rules=[
+                RuleSource("ai-agent/rules/common.md", common),
+                RuleSource("ai-agent/rules/agents/codex.md", agent),
+            ],
+        )
+
+        self.assertEqual(
+            manifest.resources[0].sources,
+            ("ai-agent/rules/common.md", "ai-agent/rules/agents/codex.md"),
+        )
+        self.assertIn("# Common", (output / "AGENTS.md").read_text())
 
     def test_doctor_checks_local_prerequisite_without_reading_content(self) -> None:
         local = self.identity.home / "local.inc"

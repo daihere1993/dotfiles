@@ -10,7 +10,7 @@ dev_dot=$state_root/bin/dot
 bin_directory=$HOME/.local/bin
 entry=$bin_directory/dot
 expected=$profile/bin/dot
-required_modules="apply_events apply_flow apply_reporter"
+required_modules="apply_events apply_flow apply_reporter planning"
 
 if [ -L "$dotfiles_state_root" ]; then
   echo "dotfiles state root must not be a symlink: $dotfiles_state_root" >&2
@@ -112,7 +112,7 @@ EOF
   chmod +x "$dev_dot"
   install_target=$dev_dot
   echo "Installing dot from working tree (dev mode: untracked CLI modules are not in the Nix build input)." >&2
-  echo "Run 'git add cli/dotfiles_cli/apply_*.py' and re-run this script for a Nix-packaged install." >&2
+  echo "Track the new CLI modules and re-run this script for a Nix-packaged install." >&2
 else
   store=$(nix --extra-experimental-features 'nix-command flakes' \
     build --no-link --print-out-paths .#dot)

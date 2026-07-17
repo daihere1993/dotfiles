@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .adapters import get_adapter
+from .apply_events import ActivationMilestone
 from .conflict import classify_manifests, resource_conforms
 from .doctor import diagnose_manifest, diagnostics_healthy
 from .errors import ActivationError, ConflictError, DotfilesError, ValidationError
@@ -30,7 +31,6 @@ from .models import (
     ResourceAction,
     ResourceDecision,
 )
-from .apply_events import ActivationMilestone
 from .nix import CommandRunner
 from .state import (
     atomic_write,
@@ -403,6 +403,7 @@ def activate_platform(
     plan: ActivationPlan,
     *,
     on_milestone: ActivationMilestoneCallback | None = None,
+    switch_profile: bool = True,
 ) -> DomainResult:
     desired = plan.desired_manifest
     assert_identity(plan.identity, desired)
@@ -480,8 +481,11 @@ def activate_platform(
             if action.decision == ResourceDecision.OVERWRITE:
                 _emit_milestone(on_milestone, plan.platform, ActivationMilestone.BACKUP_OVERWRITES)
                 backup_refs[action.resource.id] = _create_backup(plan, action)
-        _emit_milestone(on_milestone, plan.platform, ActivationMilestone.SWITCH_PROFILE)
-        _set_profile(runner, profile, new_store)
+        if switch_profile:
+            _emit_milestone(on_milestone, plan.platform, ActivationMilestone.SWITCH_PROFILE)
+            _set_profile(runner, profile, new_store)
+        elif old_store_resolved is None or profile.resolve(strict=True) != old_store_resolved:
+            raise ActivationError("active profile changed after reconciliation preflight")
         if profile.resolve(strict=True) not in {new_store_resolved, old_store_resolved} - {None}:
             raise ActivationError("profile resolved to neither the old nor new bundle")
         _emit_milestone(on_milestone, plan.platform, ActivationMilestone.INSTALL_SYMLINKS)
@@ -546,10 +550,11 @@ def activate_platform(
         write_receipt(receipt)
         skipped = sum(action.decision == ResourceDecision.SKIP for action in actions)
         status = "PARTIAL_UPDATED" if skipped else "UPDATED"
+        operation = "activated" if switch_profile else "reconciled"
         return DomainResult(
             plan.platform,
             status,
-            f"activated {new_store}; {skipped} resource(s) skipped",
+            f"{operation} {new_store}; {skipped} resource(s) skipped",
         )
     except Exception as original:
         cleanup_errors: list[str] = []
@@ -578,7 +583,7 @@ def activate_platform(
                 os.replace(target, payload)
             else:
                 cleanup_errors.append(f"restored target disappeared: {target}")
-        if old_store is not None:
+        if switch_profile and old_store is not None:
             try:
                 _set_profile(runner, profile, old_store)
                 for resource in retired:
@@ -644,6 +649,40 @@ def activate_platform(
         raise ActivationError(
             message, next_step=f"Run dot doctor --platform {plan.platform}."
         ) from original
+
+
+def reconcile_platform(
+    runner: CommandRunner,
+    plan: ActivationPlan,
+    *,
+    on_milestone: ActivationMilestoneCallback | None = None,
+) -> DomainResult:
+    if plan.active_manifest is None or plan.old_store_path is None:
+        raise ActivationError("cannot reconcile a platform without an active generation")
+    active = plan.active_manifest
+    results = preflight_platform(
+        active,
+        active,
+        other_active_manifests(plan.identity, plan.platform),
+        resource_level=True,
+    )
+    repair = ActivationPlan(
+        platform=plan.platform,
+        identity=plan.identity,
+        profile_path=plan.profile_path,
+        new_store_path=plan.old_store_path,
+        desired_manifest=active,
+        old_store_path=plan.old_store_path,
+        active_manifest=active,
+        actions=make_resource_actions(results, active, plan.old_receipt),
+        old_receipt=plan.old_receipt,
+    )
+    return activate_platform(
+        runner,
+        repair,
+        on_milestone=on_milestone,
+        switch_profile=False,
+    )
 
 
 def system_manifest_path(store: Path) -> Path:
