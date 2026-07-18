@@ -44,6 +44,28 @@ Nix generations provide system rollback. Git provides content history. The old
 `dot` CLI, doctor, per-platform apply, dry-run planner, conflict backups, event
 stream, and custom rollback are no longer available.
 
+## Neovim
+
+Home Manager installs Neovim and its base command-line dependencies. It links
+`~/.config/nvim` to the writable configuration at `~/.dotfiles/nvim`, so
+editing either path changes the repository working tree immediately.
+
+Edits to tracked files under `nvim/` do not require a rebuild. Add, remove, or
+rename files in Git before rebuilding so the flake can see them. Changes to the
+Neovim package, dependencies, or Home Manager declarations require:
+
+```sh
+~/.dotfiles/scripts/rebuild.sh
+```
+
+Plugins, Mason tools, Treesitter parsers, caches, and state remain under the
+standard XDG data, cache, and state directories. They are not part of the
+dotfiles repository. Nix generations roll back packages and link declarations;
+use Git to restore Neovim configuration content.
+
+The initial migration preserves the existing Neovim configuration and plugin
+lock file without cleaning up or upgrading them.
+
 ## Machine identity
 
 Bootstrap writes `.machine.nix` in the checkout:
