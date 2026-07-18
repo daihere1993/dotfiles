@@ -1,6 +1,7 @@
 { username, homeDirectory, ... }:
 {
   imports = [
+    ../ai-agent
     ./git.nix
     ./ssh.nix
     ./development.nix
@@ -13,4 +14,3 @@
 
   programs.home-manager.enable = true;
 }
-

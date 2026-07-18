@@ -1,4 +1,4 @@
-{ pkgs, username, homeDirectory, dot, ... }:
+{ pkgs, username, homeDirectory, ... }:
 {
   nixpkgs.hostPlatform = "aarch64-darwin";
 
@@ -15,6 +15,4 @@
   };
 
   users.users.${username}.home = homeDirectory;
-  environment.systemPackages = [ dot ];
 }
-

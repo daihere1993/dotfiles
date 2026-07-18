@@ -1,95 +1,123 @@
 # dotfiles
 
-This repository is the single source of truth for shared Apple Silicon macOS configuration. Nix builds immutable artifacts, Home Manager owns Git and SSH configuration, and `dot` deploys allowlisted global configuration for Codex, Claude Code, and Cursor.
+This repository is the source of truth for one Apple Silicon macOS system and
+for shared Codex, Claude Code, and Cursor skills. nix-darwin manages the system,
+Home Manager manages user configuration, and Git records content history.
 
-The repository never manages credentials, sessions, private keys, vendor databases, shell configuration, or project-level Agent files. Cursor global rules have no supported filesystem interface and are reported as `UNSUPPORTED_OPTIONAL`.
+The repository does not manage credentials, private keys, sessions, vendor
+databases, shell configuration, project-level Agent files, or Cursor User
+Rules.
 
 ## First installation
 
-Clone the repository and run:
+Clone the repository, then run:
 
 ```sh
-./bootstrap/install
+./scripts/bootstrap.sh
 ```
 
-The script checks macOS and Xcode Command Line Tools, installs Nix when needed, installs the `dot` CLI in an independent user profile, initializes machine identity, validates the repository, applies the deployment domains, and runs doctor. GitHub and Agent vendor authentication remain manual.
+Bootstrap verifies Apple Silicon macOS and Xcode Command Line Tools, installs
+multi-user Nix when needed, links the checkout at `~/.dotfiles`, writes the
+machine-local identity, activates nix-darwin, and removes legacy deployment
+state after a successful switch.
 
-The CLI profile lives at `~/.local/state/dotfiles/cli/profile`, with a stable entry at `~/.local/bin/dot`. It is installed and upgraded independently of the System domain, so Git or SSH conflicts cannot prevent `dot` from being available. `~/.local/bin` must be on `PATH`; bootstrap reports a warning if it is not. Before bootstrap, the CLI can still be run through `nix run .#dot -- …`.
+`~/.dotfiles` must either be absent or already resolve to this checkout.
+Bootstrap refuses regular files, directories, broken links, and links to other
+locations. Agent vendor and GitHub authentication remain manual.
 
-## Daily commands
+## Daily use
+
+Apply tracked configuration with:
 
 ```sh
-dot --version
-dot validate
-dot apply --check
-dot apply
-dot apply -y
-dot apply --platform codex
-dot apply --verbose
-dot apply --json-events
-dot doctor
-dot doctor --json
-dot rollback
+~/.dotfiles/scripts/rebuild.sh
 ```
 
-`dot apply` runs in phases: Plan, Build, Preflight, Changes, optional conflict resolution, confirmation, Apply, Verification, and Result. Progress is shown per deployment domain instead of waiting for a final summary. In an interactive terminal, `dot apply` asks `Apply? [y/N]` after conflicts are resolved. A non-interactive apply with changes refuses to modify state unless `-y` is supplied.
+Run validation or formatting directly:
 
-`dot apply --check` stops after the Changes plan without modifying state. The plan distinguishes resource content changes from platform generation changes: a new bundle Store path alone is a no-op, while provenance-only changes switch metadata without counting unchanged resources as updates. `--verbose` shows unchanged resources carried into a new generation and streams Nix build output. `--json-events` emits one NDJSON event per line for automation, including a stable `domainActions` list.
+```sh
+nix flake check
+nix fmt
+```
 
-`dot apply --platform <platform>` builds and switches only that Agent profile. Agent resources are applied independently, so a conflicting skill does not block rules or other skills. A full apply resolves every conflict before making the first change, then continues in system, Codex, Claude, and Cursor order.
+Nix generations provide system rollback. Git provides content history. The old
+`dot` CLI, doctor, per-platform apply, dry-run planner, conflict backups, event
+stream, and custom rollback are no longer available.
 
-`dot rollback` rolls back only the system domain to the previous distinct generation whose manifest matches the current machine identity. It never changes Agent profiles or Git state.
+## Machine identity
 
-Do not run `dot apply` concurrently with `darwin-rebuild`, `home-manager`, or another apply. Direct deployment commands bypass `dot` conflict checks and post-activation verification.
+Bootstrap writes `.machine.nix` in the checkout:
 
-## Machine-local files
+```nix
+{
+  username = "example";
+  homeDirectory = "/Users/example";
+  nixSystem = "aarch64-darwin";
+}
+```
 
-Initialization records the system account in `~/.local/state/dotfiles/machine.json`. Do not edit or copy this file between machines.
+The file is ignored by Git and must not be copied between machines. Bootstrap
+derives its values from the macOS account database instead of `USER` or `HOME`.
+Rebuild passes its absolute path to Nix through `DOTFILES_MACHINE` and evaluates
+the local configuration with `--impure`.
 
-These optional files remain user-owned and are never read or deployed by dotfiles:
+## Agent rules and skills
+
+Shared rules live at `modules/ai-agent/AGENTS.md`. Home Manager creates
+out-of-store links for Codex and Claude:
+
+```text
+~/.codex/AGENTS.md   -> ~/.dotfiles/modules/ai-agent/AGENTS.md
+~/.claude/CLAUDE.md  -> ~/.dotfiles/modules/ai-agent/AGENTS.md
+```
+
+Cursor global User Rules remain a product setting and have no managed file.
+
+Every direct child of `modules/ai-agent/skills/` is a managed local skill. A
+skill ID may contain lowercase ASCII letters, digits, and hyphens, and the
+directory must contain `SKILL.md`. Each skill is linked individually:
+
+```text
+~/.agents/skills/<skill-id>  -> ~/.dotfiles/modules/ai-agent/skills/<skill-id>
+~/.claude/skills/<skill-id>  -> ~/.dotfiles/modules/ai-agent/skills/<skill-id>
+~/.cursor/skills/<skill-id>  -> ~/.dotfiles/modules/ai-agent/skills/<skill-id>
+```
+
+Editing an existing rule or skill takes effect immediately. Adding, removing,
+or renaming a skill requires tracking the change before rebuilding:
+
+```sh
+git add modules/ai-agent/skills/<skill-id>
+~/.dotfiles/scripts/rebuild.sh
+```
+
+Dotfiles owns only skill IDs present in this repository. A rebuild replaces a
+same-name file, link, or directory without backup; unrelated local skills stay
+untouched. External skills and per-platform skill profiles are not supported.
+
+## Git and SSH
+
+Home Manager continues to generate the main Git and SSH configuration. These
+optional includes remain user-owned and are never read, replaced, backed up, or
+deleted:
 
 ```text
 ~/.config/git/local.inc
 ~/.ssh/config.local
 ```
 
-On the first apply, an existing safe `~/.ssh/config` is moved to
-`~/.ssh/config.local`. If both files exist, the old main config is appended to
-`config.local` before dotfiles installs its generated main config.
+## Legacy cleanup
 
-Doctor checks only their file type, owner, and write permissions.
-
-## Agent rules and skills
-
-Edit shared rules in `ai-agent/rules/common.md` and platform additions in `ai-agent/rules/agents/`. Run `dot validate` and `dot apply` after every change; generated files are read-only Nix Store artifacts.
-
-Dotfiles owns individual entries below each platform's skills directory, not the directory itself. Unrelated manual skills remain untouched. In an interactive terminal, an unmanaged skill with the same target ID can be backed up and overwritten or skipped. An explicitly authorized non-interactive apply defaults eligible conflicts to skip. Empty, safely permissioned rules files may be adopted automatically; non-empty rules files are skipped without being overwritten.
-
-A local skill lives at `ai-agent/skills/<skill-id>/` and must include a `SKILL.md` whose frontmatter name equals the directory name. Select it explicitly in `ai-agent/profiles/default.nix` as `local:<skill-id>`.
-
-Declare a third-party repository as a root-level `flake = false` input. Map the source and selected directory in `ai-agent/external-skills.nix`, then select `external:<source-id>/<skill-id>` in the profile. Update it explicitly:
+Successful bootstrap and rebuild runs call cleanup automatically. To migrate an
+additional existing machine independently, run:
 
 ```sh
-nix flake update <source-id>
-dot validate
-dot apply --check
-dot apply
+~/.dotfiles/scripts/cleanup-legacy.sh
 ```
 
-Updating `flake.lock` never deploys automatically.
-
-## Conflicts and diagnosis
-
-`dot apply --check` reports conflicts without prompting or changing state. Interactive apply offers `overwrite`, `skip`, `overwrite all`, and `skip all` for eligible Agent skill conflicts. Overwrite moves the old entry into `~/.local/state/dotfiles/backups/` before installing the managed link. Backups are retained and restored if that skill later leaves the profile. Other conflicts are skipped and never overwritten.
-
-Doctor reports:
-
-- `NOT_DEPLOYED` or `STAGED_NOT_DEPLOYED` for inactive platform profiles;
-- `MISSING` when a managed entry disappeared;
-- `DRIFTED` when its symlink or content differs from the manifest;
-- `SKIPPED_CONFLICT` when a desired resource remains user-owned;
-- `BACKUP_MISSING` when a managed resource has lost its restoration backup;
-- `LOCAL_ABSENT_OPTIONAL`, `LOCAL_PRESENT`, or `LOCAL_UNSAFE_PERMISSIONS` for local includes;
-- `UNSUPPORTED_OPTIONAL` for Cursor global rules.
-
-No command prints the contents of local includes, credentials, sessions, caches, or vendor state.
+The script prints its deletion plan and asks for confirmation. It removes only
+Agent links into `~/.local/state/dotfiles/platforms/`, a legacy-managed
+`~/.local/bin/dot`, and the old state directory. It refuses an unrelated `dot`
+entry and leaves ordinary files, directories, new Agent links, and unrelated
+skills unchanged. Deleting the old state and its backups is irreversible; the
+script does not run Nix garbage collection.

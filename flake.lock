@@ -62,24 +62,7 @@
       "inputs": {
         "home-manager": "home-manager",
         "nix-darwin": "nix-darwin",
-        "nixpkgs": "nixpkgs",
-        "superpowers": "superpowers"
-      }
-    },
-    "superpowers": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1783029415,
-        "narHash": "sha256-kHdQ9e44doBk2yYW88tMSCqVG8ycYcvJSZlrIziXhpA=",
-        "owner": "obra",
-        "repo": "superpowers",
-        "rev": "d884ae04edebef577e82ff7c4e143debd0bbec99",
-        "type": "github"
-      },
-      "original": {
-        "owner": "obra",
-        "repo": "superpowers",
-        "type": "github"
+        "nixpkgs": "nixpkgs"
       }
     }
   },

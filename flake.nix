@@ -1,5 +1,5 @@
 {
-  description = "Shared declarative macOS configuration and Agent configuration compiler";
+  description = "Shared declarative Apple Silicon macOS configuration";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
@@ -13,248 +13,179 @@
       url = "github:nix-community/home-manager/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    superpowers = {
-      url = "github:obra/superpowers";
-      flake = false;
-    };
   };
 
   outputs = inputs@{ self, nixpkgs, nix-darwin, home-manager, ... }:
     let
       system = "aarch64-darwin";
       pkgs = import nixpkgs { inherit system; };
-      profiles = import ./ai-agent/profiles/default.nix;
-      external = import ./ai-agent/external-skills.nix { inherit inputs; };
-      externalSkillSpecs = builtins.mapAttrs
-        (key: entry:
-          let
-            source = external.sources.${entry.sourceId} or (throw "unknown source ${entry.sourceId}");
-            input = inputs.${source.inputName} or (throw "missing flake input ${source.inputName}");
-          in
-          assert key == "${entry.sourceId}/${entry.skillId}";
-          assert source.inputName == entry.sourceId;
-          assert input ? narHash;
-          {
-            canonicalId = "external:${key}";
-            targetId = entry.skillId;
-            path = "${input.outPath}/${entry.path}";
-            sourceKind = "external";
-            sourcePath = entry.path;
-            sourceId = entry.sourceId;
-            narHash = input.narHash or (throw "external input ${entry.sourceId} lacks narHash");
-            rev = input.rev or null;
-          })
-        external.skills;
-      dotSrc = builtins.path {
-        path = ./.;
-        name = "dotfiles-cli-src";
-        filter = path: type:
-          let
-            root = toString ./.;
-            rel = if path == root then "" else pkgs.lib.removePrefix (root + "/") path;
-          in
-          rel == ""
-          || rel == "pyproject.toml"
-          || rel == "cli"
-          || pkgs.lib.hasPrefix "cli/" rel;
-      };
-      dot = pkgs.python3Packages.buildPythonApplication {
-        pname = "dotfiles-cli";
-        version = "0.1.0";
-        pyproject = true;
-        src = dotSrc;
-        build-system = [ pkgs.python3Packages.setuptools ];
-        makeWrapperArgs = [ "--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.nix ]}" ];
-      };
-      parseIdentity = identityJson:
-        let identity = builtins.fromJSON identityJson;
-        in assert identity.schemaVersion == 1;
-        assert identity.nixSystem == system;
-        identity;
-      mkDarwinConfiguration = { identityJson }:
-        let identity = parseIdentity identityJson;
-        in nix-darwin.lib.darwinSystem {
-          inherit system;
+
+      validateMachine = machine:
+        if !builtins.isAttrs machine then
+          throw "machine identity must be an attribute set"
+        else if !(machine ? username) || !builtins.isString machine.username || machine.username == "" then
+          throw "machine identity requires a non-empty username string"
+        else if !(machine ? homeDirectory) || !builtins.isString machine.homeDirectory || machine.homeDirectory == "" then
+          throw "machine identity requires a non-empty homeDirectory string"
+        else if builtins.substring 0 1 machine.homeDirectory != "/" then
+          throw "machine homeDirectory must be absolute"
+        else if !(machine ? nixSystem) || !builtins.isString machine.nixSystem then
+          throw "machine identity requires a nixSystem string"
+        else if machine.nixSystem != system then
+          throw "machine nixSystem must be ${system}"
+        else
+          machine;
+
+      loadMachine = path:
+        if path == "" then
+          throw "DOTFILES_MACHINE is required; run scripts/bootstrap.sh or scripts/rebuild.sh"
+        else if builtins.substring 0 1 path != "/" then
+          throw "DOTFILES_MACHINE must be an absolute path"
+        else if !builtins.pathExists path then
+          throw "DOTFILES_MACHINE does not exist: ${path}"
+        else
+          validateMachine (import path);
+
+      mkDarwinConfiguration = machine:
+        let
+          identity = validateMachine machine;
+        in
+        nix-darwin.lib.darwinSystem {
+          system = identity.nixSystem;
           specialArgs = {
-            inherit inputs dot;
-            username = identity.username;
-            homeDirectory = identity.homeDirectory;
-            nixSystem = identity.nixSystem;
+            inherit inputs;
+            inherit (identity) username homeDirectory nixSystem;
           };
           modules = [
             ./modules/darwin/common.nix
-            ./modules/darwin/system-manifest.nix
             home-manager.darwinModules.home-manager
             {
               home-manager = {
                 useGlobalPkgs = true;
                 useUserPackages = true;
                 extraSpecialArgs = {
-                  username = identity.username;
-                  homeDirectory = identity.homeDirectory;
+                  inherit (identity) username homeDirectory;
                 };
                 users.${identity.username} = import ./modules/home/common.nix;
               };
             }
           ];
         };
-      mkAgentBundle =
-        { identityJson
-        , platform
-        , commonRule ? builtins.path {
-            path = ./ai-agent/rules/common.md;
-            name = "dotfiles-common-rules.md";
-          }
-        , platformRule ? builtins.path {
-            path = ./. + "/ai-agent/rules/agents/${platform}.md";
-            name = "dotfiles-${platform}-rules.md";
-          }
-        }:
-        let
-          identity = parseIdentity identityJson;
-          selected = profiles.${platform} or (throw "unknown platform ${platform}");
-          localSkillSpec = canonicalId:
-            let
-              targetId = pkgs.lib.removePrefix "local:" canonicalId;
-              sourcePath = "ai-agent/skills/${targetId}";
-            in
-            {
-              inherit targetId sourcePath;
-              canonicalId = canonicalId;
-              path = toString (builtins.path {
-                path = ./. + "/${sourcePath}";
-                name = "dotfiles-skill-${targetId}";
-              });
-              sourceKind = "local";
-            };
-          skillArgument = canonicalId:
-            if pkgs.lib.hasPrefix "local:" canonicalId then
-              "--skill-spec ${pkgs.lib.escapeShellArg (builtins.toJSON (localSkillSpec canonicalId))}"
-            else if pkgs.lib.hasPrefix "external:" canonicalId then
-              let
-                key = pkgs.lib.removePrefix "external:" canonicalId;
-                spec = externalSkillSpecs.${key} or (throw "unknown external skill ${canonicalId}");
-              in
-              "--skill-spec ${pkgs.lib.escapeShellArg (builtins.toJSON spec)}"
-            else throw "invalid canonical skill ID ${canonicalId}";
-          ruleSpecs = if platform == "cursor" then [ ] else [
-            {
-              sourcePath = "ai-agent/rules/common.md";
-              path = toString commonRule;
-            }
-            {
-              sourcePath = "ai-agent/rules/agents/${platform}.md";
-              path = toString platformRule;
-            }
-          ];
-          ruleArgument = spec:
-            "--rule-spec ${pkgs.lib.escapeShellArg (builtins.toJSON spec)}";
-        in
-        pkgs.runCommand "dotfiles-${platform}-bundle"
-          {
-            nativeBuildInputs = [ dot ];
-            preferLocalBuild = true;
-          } ''
-          dot internal-compile \
-            --platform ${platform} \
-            --identity-json '${builtins.toJSON identity}' \
-            --artifact-root "$out" \
-            --output "$out" \
-            ${builtins.concatStringsSep " " (map ruleArgument ruleSpecs)} \
-            ${builtins.concatStringsSep " " (map skillArgument selected)}
-        '';
-      testIdentity = builtins.toJSON {
-        schemaVersion = 1;
+
+      testMachine = {
         username = "testuser";
         homeDirectory = "/Users/testuser";
         nixSystem = system;
       };
-      secondTestIdentity = builtins.toJSON {
-        schemaVersion = 1;
+      otherTestMachine = {
         username = "otheruser";
         homeDirectory = "/Users/otheruser";
         nixSystem = system;
       };
-      testDarwin = (mkDarwinConfiguration { identityJson = testIdentity; }).system;
-      secondTestDarwin = (mkDarwinConfiguration { identityJson = secondTestIdentity; }).system;
+      testConfiguration = mkDarwinConfiguration testMachine;
+      otherTestConfiguration = mkDarwinConfiguration otherTestMachine;
+      testHome = testConfiguration.config.home-manager.users.${testMachine.username};
+
+      skillEntries = builtins.readDir ./modules/ai-agent/skills;
+      skillIds = builtins.attrNames skillEntries;
+      skillRoots = [
+        ".agents/skills"
+        ".claude/skills"
+        ".cursor/skills"
+      ];
+      expectedAgentLinks = [
+        {
+          target = ".codex/AGENTS.md";
+          source = "${testMachine.homeDirectory}/.dotfiles/modules/ai-agent/AGENTS.md";
+        }
+        {
+          target = ".claude/CLAUDE.md";
+          source = "${testMachine.homeDirectory}/.dotfiles/modules/ai-agent/AGENTS.md";
+        }
+      ] ++ builtins.concatMap
+        (skillId: map
+          (root: {
+            target = "${root}/${skillId}";
+            source = "${testMachine.homeDirectory}/.dotfiles/modules/ai-agent/skills/${skillId}";
+          })
+          skillRoots)
+        skillIds;
+      checkedAgentLinks = map
+        (expected:
+          let
+            file = testHome.home.file.${expected.target}
+              or (throw "missing Agent mapping: ${expected.target}");
+          in
+          assert file.force;
+          expected // { actualSource = file.source; })
+        expectedAgentLinks;
     in
     {
       lib = {
-        inherit mkDarwinConfiguration mkAgentBundle;
-        agentConfig = {
-          inherit profiles;
-          externalSkills = externalSkillSpecs;
-        };
+        inherit mkDarwinConfiguration;
       };
 
-      packages.${system} = {
-        inherit dot;
-        default = dot;
-      };
-
-      apps.${system}.dot = {
-        type = "app";
-        program = "${dot}/bin/dot";
-        meta.description = "Validate and deploy this dotfiles repository";
-      };
+      darwinConfigurations.mac =
+        mkDarwinConfiguration (loadMachine (builtins.getEnv "DOTFILES_MACHINE"));
 
       formatter.${system} = pkgs.nixpkgs-fmt;
 
       checks.${system} = {
-        dot = dot;
-        darwin-testuser = testDarwin;
-        darwin-otheruser = secondTestDarwin;
-        system-manifest-present = pkgs.runCommand "dotfiles-system-manifest-present" { } ''
-          test -f ${testDarwin}/sw/share/dotfiles/system-manifest.json
-          touch $out
+        darwin-testuser = testConfiguration.system;
+        darwin-otheruser = otherTestConfiguration.system;
+
+        agent-links = pkgs.runCommand "dotfiles-agent-links" { } ''
+          ${builtins.concatStringsSep "\n" (map
+            (link: ''
+              test "$(readlink ${pkgs.lib.escapeShellArg (toString link.actualSource)})" = \
+                ${pkgs.lib.escapeShellArg link.source}
+            '')
+            checkedAgentLinks)}
+          touch "$out"
         '';
-        codex-bundle = mkAgentBundle { identityJson = testIdentity; platform = "codex"; };
-        claude-bundle = mkAgentBundle { identityJson = testIdentity; platform = "claude"; };
-        cursor-bundle = mkAgentBundle { identityJson = testIdentity; platform = "cursor"; };
-        agent-input-isolation =
-          let
-            alternateCommon = builtins.toFile "alternate-common-rules.md" "alternate\n";
-            defaultCursor = (mkAgentBundle {
-              identityJson = testIdentity;
-              platform = "cursor";
-            }).drvPath;
-            alternateCursor = (mkAgentBundle {
-              identityJson = testIdentity;
-              platform = "cursor";
-              commonRule = alternateCommon;
-            }).drvPath;
-            defaultCodex = (mkAgentBundle {
-              identityJson = testIdentity;
-              platform = "codex";
-            }).drvPath;
-            alternateCodex = (mkAgentBundle {
-              identityJson = testIdentity;
-              platform = "codex";
-              commonRule = alternateCommon;
-            }).drvPath;
-          in
-          assert defaultCursor == alternateCursor;
-          assert defaultCodex != alternateCodex;
-          pkgs.runCommand "dotfiles-agent-input-isolation" { } ''
-            touch $out
+
+        no-external-skills =
+          assert !(inputs ? superpowers);
+          assert !(builtins.elem "brainstorming" skillIds);
+          pkgs.runCommand "dotfiles-no-external-skills" { } ''
+            touch "$out"
           '';
-        python-tests = pkgs.runCommand "dotfiles-python-tests"
+
+        machine-validation =
+          assert !(builtins.tryEval (validateMachine null)).success;
+          assert !(builtins.tryEval (validateMachine {
+            username = "testuser";
+            homeDirectory = "relative/home";
+            nixSystem = system;
+          })).success;
+          assert !(builtins.tryEval (validateMachine {
+            username = "testuser";
+            homeDirectory = "/Users/testuser";
+            nixSystem = "x86_64-darwin";
+          })).success;
+          pkgs.runCommand "dotfiles-machine-validation" { } ''
+            touch "$out"
+          '';
+
+        shell-tests = pkgs.runCommand "dotfiles-shell-tests"
           {
-            nativeBuildInputs = [ pkgs.python3 ];
+            nativeBuildInputs = [ pkgs.bash pkgs.nix ];
           } ''
-          cd ${self}
-          PYTHONPATH=cli python -m unittest discover -s tests -v
-          touch $out
+          DOTFILES_REPOSITORY=${pkgs.lib.escapeShellArg (toString self)} \
+            bash ${self}/tests/shell/run.sh
+          touch "$out"
         '';
+
         lint = pkgs.runCommand "dotfiles-lint"
           {
-            nativeBuildInputs = [ pkgs.ruff pkgs.shellcheck pkgs.nixpkgs-fmt ];
+            nativeBuildInputs = [ pkgs.nixpkgs-fmt pkgs.shellcheck ];
           } ''
-          RUFF_NO_CACHE=true ruff check ${self}/cli ${self}/tests
-          shellcheck ${self}/bootstrap/install ${self}/bootstrap/install-dot
-          nixpkgs-fmt --check ${self}/flake.nix ${self}/modules ${self}/ai-agent
-          touch $out
+          shellcheck \
+            ${self}/scripts/*.sh \
+            ${self}/tests/shell/*.sh \
+            ${self}/modules/ai-agent/remove-conflicting-skill-directory.sh
+          nixpkgs-fmt --check ${self}/flake.nix ${self}/modules
+          touch "$out"
         '';
       };
     };
