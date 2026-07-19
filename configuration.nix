@@ -1,5 +1,6 @@
 { pkgs, username, homeDirectory, ... }:
 {
+  # Configure the shared nix-darwin platform and Nix daemon behavior.
   nixpkgs.hostPlatform = "aarch64-darwin";
 
   nix = {
@@ -9,6 +10,7 @@
     optimise.automatic = true;
   };
 
+  # Bind the evaluated machine identity to the macOS system and local account.
   system = {
     primaryUser = username;
     stateVersion = 6;

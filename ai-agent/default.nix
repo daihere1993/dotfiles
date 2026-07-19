@@ -1,5 +1,6 @@
 { config, homeDirectory, lib, pkgs, ... }:
 let
+  # Discover only well-formed direct child skill directories for deployment.
   skillsDirectory = ./skills;
   skillEntries = builtins.readDir skillsDirectory;
   allSkillIds = builtins.attrNames skillEntries;
@@ -23,6 +24,7 @@ let
     (skillId: skillEntries.${skillId} == "directory" && !hasSkillFile skillId)
     allSkillIds;
 
+  # Link to the mutable checkout so edits are visible without a Home Manager switch.
   repositoryRoot = "${homeDirectory}/.dotfiles";
   skillRoots = [
     ".agents/skills"
@@ -34,17 +36,19 @@ let
     force = true;
   };
   ruleFiles = {
-    ".codex/AGENTS.md" = mkOutOfStoreFile "modules/ai-agent/AGENTS.md";
-    ".claude/CLAUDE.md" = mkOutOfStoreFile "modules/ai-agent/AGENTS.md";
+    ".codex/AGENTS.md" = mkOutOfStoreFile "ai-agent/AGENTS.md";
+    ".claude/CLAUDE.md" = mkOutOfStoreFile "ai-agent/AGENTS.md";
   };
   skillFiles = lib.listToAttrs (lib.concatMap
     (skillId: map
       (root: {
         name = "${root}/${skillId}";
-        value = mkOutOfStoreFile "modules/ai-agent/skills/${skillId}";
+        value = mkOutOfStoreFile "ai-agent/skills/${skillId}";
       })
       skillRoots)
     skillIds);
+  # Home Manager cannot replace real directories with links, so remove only managed
+  # same-name skill directories immediately before link generation.
   removeConflictingSkillDirectories = lib.concatMapStringsSep "\n"
     (skillId: lib.concatMapStringsSep "\n"
       (root:

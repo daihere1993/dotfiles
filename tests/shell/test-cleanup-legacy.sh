@@ -20,9 +20,9 @@ mkdir -p \
   "$home_directory/.claude/skills" \
   "$home_directory/.agents/skills" \
   "$home_directory/.cursor/skills" \
-  "$home_directory/.dotfiles/modules/ai-agent"
+  "$home_directory/.dotfiles/ai-agent"
 ln -s "$legacy_root/platforms/codex/profile/AGENTS.md" "$home_directory/.codex/AGENTS.md"
-ln -s "$home_directory/.dotfiles/modules/ai-agent/AGENTS.md" "$home_directory/.claude/CLAUDE.md"
+ln -s "$home_directory/.dotfiles/ai-agent/AGENTS.md" "$home_directory/.claude/CLAUDE.md"
 ln -s "$legacy_root/platforms/codex/profile/skills/commit-code" \
   "$home_directory/.agents/skills/commit-code"
 ln -s "$legacy_root/platforms/claude/profile/skills/brainstorming" \

@@ -85,31 +85,31 @@ the local configuration with `--impure`.
 
 ## Agent rules and skills
 
-Shared rules live at `modules/ai-agent/AGENTS.md`. Home Manager creates
+Shared rules live at `ai-agent/AGENTS.md`. Home Manager creates
 out-of-store links for Codex and Claude:
 
 ```text
-~/.codex/AGENTS.md   -> ~/.dotfiles/modules/ai-agent/AGENTS.md
-~/.claude/CLAUDE.md  -> ~/.dotfiles/modules/ai-agent/AGENTS.md
+~/.codex/AGENTS.md   -> ~/.dotfiles/ai-agent/AGENTS.md
+~/.claude/CLAUDE.md  -> ~/.dotfiles/ai-agent/AGENTS.md
 ```
 
 Cursor global User Rules remain a product setting and have no managed file.
 
-Every direct child of `modules/ai-agent/skills/` is a managed local skill. A
+Every direct child of `ai-agent/skills/` is a managed local skill. A
 skill ID may contain lowercase ASCII letters, digits, and hyphens, and the
 directory must contain `SKILL.md`. Each skill is linked individually:
 
 ```text
-~/.agents/skills/<skill-id>  -> ~/.dotfiles/modules/ai-agent/skills/<skill-id>
-~/.claude/skills/<skill-id>  -> ~/.dotfiles/modules/ai-agent/skills/<skill-id>
-~/.cursor/skills/<skill-id>  -> ~/.dotfiles/modules/ai-agent/skills/<skill-id>
+~/.agents/skills/<skill-id>  -> ~/.dotfiles/ai-agent/skills/<skill-id>
+~/.claude/skills/<skill-id>  -> ~/.dotfiles/ai-agent/skills/<skill-id>
+~/.cursor/skills/<skill-id>  -> ~/.dotfiles/ai-agent/skills/<skill-id>
 ```
 
 Editing an existing rule or skill takes effect immediately. Adding, removing,
 or renaming a skill requires tracking the change before rebuilding:
 
 ```sh
-git add modules/ai-agent/skills/<skill-id>
+git add ai-agent/skills/<skill-id>
 ~/.dotfiles/scripts/rebuild.sh
 ```
 

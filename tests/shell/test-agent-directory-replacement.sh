@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository=${DOTFILES_REPOSITORY:-$(CDPATH='' cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)}
-helper="$repository/modules/ai-agent/remove-conflicting-skill-directory.sh"
+helper="$repository/ai-agent/remove-conflicting-skill-directory.sh"
 temporary=$(mktemp -d -t dotfiles-agent-test.XXXXXX)
 trap 'rm -rf "$temporary"' EXIT
 home_directory="$temporary/home"

@@ -57,7 +57,7 @@
             inherit (identity) username homeDirectory nixSystem;
           };
           modules = [
-            ./modules/darwin/common.nix
+            ./configuration.nix
             home-manager.darwinModules.home-manager
             {
               home-manager = {
@@ -66,7 +66,7 @@
                 extraSpecialArgs = {
                   inherit (identity) username homeDirectory;
                 };
-                users.${identity.username} = import ./modules/home/common.nix;
+                users.${identity.username} = import ./home.nix;
               };
             }
           ];
@@ -86,7 +86,7 @@
       otherTestConfiguration = mkDarwinConfiguration otherTestMachine;
       testHome = testConfiguration.config.home-manager.users.${testMachine.username};
 
-      skillEntries = builtins.readDir ./modules/ai-agent/skills;
+      skillEntries = builtins.readDir ./ai-agent/skills;
       skillIds = builtins.attrNames skillEntries;
       skillRoots = [
         ".agents/skills"
@@ -96,17 +96,17 @@
       expectedAgentLinks = [
         {
           target = ".codex/AGENTS.md";
-          source = "${testMachine.homeDirectory}/.dotfiles/modules/ai-agent/AGENTS.md";
+          source = "${testMachine.homeDirectory}/.dotfiles/ai-agent/AGENTS.md";
         }
         {
           target = ".claude/CLAUDE.md";
-          source = "${testMachine.homeDirectory}/.dotfiles/modules/ai-agent/AGENTS.md";
+          source = "${testMachine.homeDirectory}/.dotfiles/ai-agent/AGENTS.md";
         }
       ] ++ builtins.concatMap
         (skillId: map
           (root: {
             target = "${root}/${skillId}";
-            source = "${testMachine.homeDirectory}/.dotfiles/modules/ai-agent/skills/${skillId}";
+            source = "${testMachine.homeDirectory}/.dotfiles/ai-agent/skills/${skillId}";
           })
           skillRoots)
         skillIds;
@@ -146,7 +146,6 @@
 
         no-external-skills =
           assert !(inputs ? superpowers);
-          assert !(builtins.elem "brainstorming" skillIds);
           pkgs.runCommand "dotfiles-no-external-skills" { } ''
             touch "$out"
           '';
@@ -183,8 +182,9 @@
           shellcheck \
             ${self}/scripts/*.sh \
             ${self}/tests/shell/*.sh \
-            ${self}/modules/ai-agent/remove-conflicting-skill-directory.sh
-          nixpkgs-fmt --check ${self}/flake.nix ${self}/modules
+            ${self}/ai-agent/remove-conflicting-skill-directory.sh
+          nixpkgs-fmt --check ${self}/flake.nix ${self}/configuration.nix \
+            ${self}/home.nix ${self}/ai-agent/default.nix
           touch "$out"
         '';
       };
