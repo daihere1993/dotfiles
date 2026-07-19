@@ -5,8 +5,7 @@ for shared Codex, Claude Code, and Cursor skills. nix-darwin manages the system,
 Home Manager manages user configuration, and Git records content history.
 
 The repository does not manage credentials, private keys, sessions, vendor
-databases, shell configuration, project-level Agent files, or Cursor User
-Rules.
+databases, project-level Agent files, or Cursor User Rules.
 
 ## First installation
 
@@ -44,6 +43,63 @@ Nix generations provide system rollback. Git provides content history. The old
 `dot` CLI, doctor, per-platform apply, dry-run planner, conflict backups, event
 stream, and custom rollback are no longer available.
 
+## Zsh
+
+Home Manager is the only source of zsh configuration. The declarations live in
+`zsh/default.nix`, and the version-controlled proxy functions live in
+`zsh/proxy.zsh`. Do not edit the generated `~/.zshrc`, `~/.zprofile`, or
+`~/.zshenv` files. Change the tracked sources, validate them, then rebuild:
+
+```sh
+nix flake check
+~/.dotfiles/scripts/rebuild.sh
+```
+
+Open a new terminal or run `exec zsh` after a successful rebuild. Home Manager
+enables completion, autosuggestions, syntax highlighting, shared deduplicated
+history, and the Starship prompt. Oh My Zsh, Powerlevel10k, NVM, pyenv, and
+hand-written tool paths are intentionally not loaded.
+
+Add executables needed by every project to `home.packages`. Put project-only
+tools in that project's flake or development shell. Use `home.sessionPath` only
+for a stable external path that Nix cannot provide. Put shell initialization in
+`zsh/default.nix` or a focused managed script instead of editing generated
+files.
+
+The following proxy commands are available but are never run during shell
+startup:
+
+```text
+haitunwan_proxy_on
+clash_proxy_on
+disable_socks_proxy
+proxy_off
+```
+
+They modify the current shell and may also modify macOS network, Git, npm,
+pnpm, VS Code, and Cursor settings. Confirm those side effects before using
+them.
+
+Store the Cursor API key in the login keychain as an application password with
+service `nok-cursor-api-key` and account equal to the macOS username. Create or
+update it through Keychain Access so the value never appears in a command-line
+argument, Git, the Nix store, or logs. A shell preserves an inherited non-empty
+`CURSOR_API_KEY`; otherwise it silently queries that keychain item.
+
+The initial migration keeps these recovery files and never deletes them:
+
+```text
+~/Downloads/zshrc.backup-2026-07-19
+~/Downloads/zprofile.backup-2026-07-19
+```
+
+If activation fails, restore the original shell files before closing the old
+terminal. To return to the legacy configuration after a successful migration,
+roll back to the previous nix-darwin generation, copy both Downloads backups
+back to `~/.zshrc` and `~/.zprofile`, and start a new zsh session. A Nix rollback
+does not restore hand-written files. The old zshrc backup contains the former
+Cursor API key; keep it mode `0600` and rotate that key after migration.
+
 ## Neovim
 
 Home Manager installs Neovim and its base command-line dependencies. It links
@@ -65,6 +121,21 @@ use Git to restore Neovim configuration content.
 
 The initial migration preserves the existing Neovim configuration and plugin
 lock file without cleaning up or upgrading them.
+
+## Homebrew and WezTerm
+
+nix-homebrew pins the native Apple Silicon Homebrew installation at
+`/opt/homebrew`. The first rebuild migrates an existing standard installation
+into nix-homebrew management. nix-darwin then installs WezTerm from the
+`wezterm` cask.
+
+Homebrew uses an incremental policy: each rebuild installs missing declared
+packages but keeps formulae, casks, and taps installed manually. Apply changes
+with the standard rebuild command:
+
+```sh
+~/.dotfiles/scripts/rebuild.sh
+```
 
 ## Machine identity
 

@@ -17,4 +17,20 @@
   };
 
   users.users.${username}.home = homeDirectory;
+
+  # Pin the native Homebrew installation and migrate an existing standard prefix.
+  nix-homebrew = {
+    enable = true;
+    enableRosetta = false;
+    user = username;
+    autoMigrate = true;
+    mutableTaps = true;
+  };
+
+  # Install macOS applications without removing manually managed Homebrew packages.
+  homebrew = {
+    enable = true;
+    casks = [ "wezterm" ];
+    onActivation.cleanup = "none";
+  };
 }

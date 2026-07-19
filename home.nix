@@ -4,8 +4,11 @@ let
   repositoryRoot = "${homeDirectory}/.dotfiles";
 in
 {
-  # Agent rules and skills have enough deployment logic to remain a focused module.
-  imports = [ ./ai-agent ];
+  # Keep focused Home Manager concerns in their own modules.
+  imports = [
+    ./ai-agent
+    ./zsh
+  ];
 
   # Define the Home Manager account and keep its own CLI available.
   home = {
@@ -17,6 +20,8 @@ in
       nodejs
       python3
       pnpm
+      curl
+      jq
       ripgrep
       fd
       tree-sitter
@@ -86,4 +91,10 @@ in
   # Use an out-of-store link so tracked Lua edits take effect without rebuilding.
   home.file.".config/nvim".source =
     config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/nvim";
+  home.file.".config/wezterm" = {
+    # This exact path is declarative and may replace an unmanaged target.
+    # The out-of-store link keeps tracked Lua edits live without rebuilding.
+    force = true;
+    source = config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/wezterm";
+  };
 }
