@@ -86,19 +86,11 @@ update it through Keychain Access so the value never appears in a command-line
 argument, Git, the Nix store, or logs. A shell preserves an inherited non-empty
 `CURSOR_API_KEY`; otherwise it silently queries that keychain item.
 
-The initial migration keeps these recovery files and never deletes them:
-
-```text
-~/Downloads/zshrc.backup-2026-07-19
-~/Downloads/zprofile.backup-2026-07-19
-```
-
-If activation fails, restore the original shell files before closing the old
-terminal. To return to the legacy configuration after a successful migration,
-roll back to the previous nix-darwin generation, copy both Downloads backups
-back to `~/.zshrc` and `~/.zprofile`, and start a new zsh session. A Nix rollback
-does not restore hand-written files. The old zshrc backup contains the former
-Cursor API key; keep it mode `0600` and rotate that key after migration.
+Home Manager force-replaces existing `~/.zshrc`, `~/.zprofile`, and `~/.zshenv`
+files during activation. Rebuild does not back them up. Copy any content you
+still need before the first rebuild. After activation, a Nix rollback restores
+an earlier managed generation, not the hand-written files that preceded Home
+Manager ownership.
 
 ## Neovim
 

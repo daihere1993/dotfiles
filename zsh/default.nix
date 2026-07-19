@@ -3,6 +3,21 @@
   # Cursor Agent and other user-installed tools keep stable launchers here.
   home.sessionPath = [ "$HOME/.local/bin" ];
 
+  # Home Manager owns the shell startup files and replaces unmanaged versions.
+  # Explicit targets avoid a leading "./" that breaks force-path matching.
+  home.file."./.zshrc" = {
+    force = true;
+    target = ".zshrc";
+  };
+  home.file."./.zprofile" = {
+    force = true;
+    target = ".zprofile";
+  };
+  home.file."./.zshenv" = {
+    force = true;
+    target = ".zshenv";
+  };
+
   programs.zsh = {
     enable = true;
     dotDir = config.home.homeDirectory;

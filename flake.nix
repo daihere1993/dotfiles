@@ -198,6 +198,12 @@
               assert builtins.hasAttr "./.zshrc" home.home.file;
               assert builtins.hasAttr "./.zprofile" home.home.file;
               assert builtins.hasAttr "./.zshenv" home.home.file;
+              assert home.home.file."./.zshrc".force;
+              assert home.home.file."./.zprofile".force;
+              assert home.home.file."./.zshenv".force;
+              assert home.home.file."./.zshrc".target == ".zshrc";
+              assert home.home.file."./.zprofile".target == ".zprofile";
+              assert home.home.file."./.zshenv".target == ".zshenv";
               assert builtins.hasAttr home.programs.starship.configPath home.home.file;
               assert home.programs.starship.enable;
               assert home.programs.starship.enableZshIntegration;
