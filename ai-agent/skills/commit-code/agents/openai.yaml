@@ -1,4 +1,0 @@
-interface:
-  display_name: "Commit Code"
-  short_description: "Commit code with quality messages."
-  default_prompt: "Use $commit-code to stage focused changes and commit them with a strong Conventional Commit message."
