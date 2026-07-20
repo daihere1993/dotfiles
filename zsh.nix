@@ -63,7 +63,7 @@
         [[ -n "$cursor_api_key" ]] && export CURSOR_API_KEY="$cursor_api_key"
       }
 
-      source ${./proxy.zsh}
+      source ${./scripts/proxy.zsh}
     '';
   };
 

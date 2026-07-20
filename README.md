@@ -46,8 +46,8 @@ stream, and custom rollback are no longer available.
 ## Zsh
 
 Home Manager is the only source of zsh configuration. The declarations live in
-`zsh/default.nix`, and the version-controlled proxy functions live in
-`zsh/proxy.zsh`. Do not edit the generated `~/.zshrc`, `~/.zprofile`, or
+`zsh.nix`, and the version-controlled proxy functions live in
+`scripts/proxy.zsh`. Do not edit the generated `~/.zshrc`, `~/.zprofile`, or
 `~/.zshenv` files. Change the tracked sources, validate them, then rebuild:
 
 ```sh
@@ -63,7 +63,7 @@ hand-written tool paths are intentionally not loaded.
 Add executables needed by every project to `home.packages`. Put project-only
 tools in that project's flake or development shell. Use `home.sessionPath` only
 for a stable external path that Nix cannot provide. Put shell initialization in
-`zsh/default.nix` or a focused managed script instead of editing generated
+`zsh.nix` or a focused managed script instead of editing generated
 files.
 
 The following proxy commands are available but are never run during shell
@@ -95,10 +95,11 @@ Manager ownership.
 ## Neovim
 
 Home Manager installs Neovim and its base command-line dependencies. It links
-`~/.config/nvim` to the writable configuration at `~/.dotfiles/nvim`, so
-editing either path changes the repository working tree immediately.
+`~/.config/nvim` to the writable configuration at
+`~/.dotfiles/home/config/nvim`, so editing either path changes the repository
+working tree immediately.
 
-Edits to tracked files under `nvim/` do not require a rebuild. Add, remove, or
+Edits to tracked files under `home/config/nvim/` do not require a rebuild. Add, remove, or
 rename files in Git before rebuilding so the flake can see them. Changes to the
 Neovim package, dependencies, or Home Manager declarations require:
 

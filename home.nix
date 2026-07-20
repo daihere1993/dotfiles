@@ -51,7 +51,7 @@ let
 in
 {
   imports = [
-    ./zsh
+    ./zsh.nix
   ];
 
   # Define the Home Manager account and keep its own CLI available.
@@ -147,8 +147,8 @@ in
   # Use out-of-store links so tracked edits take effect without rebuilding.
   home.file = agentRuleFiles // agentSkillFiles // {
     ".config/nvim".source =
-      config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/nvim";
+      config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/home/config/nvim";
     ".config/wezterm".source =
-      config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/wezterm";
+      config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/home/config/wezterm";
   };
 }

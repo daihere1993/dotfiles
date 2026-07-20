@@ -229,7 +229,7 @@
           assert validateZsh testHome;
           assert validateZsh otherTestHome;
           assert pkgs.lib.all
-            (name: pkgs.lib.hasInfix "${name}()" (builtins.readFile ./zsh/proxy.zsh))
+            (name: pkgs.lib.hasInfix "${name}()" (builtins.readFile ./scripts/proxy.zsh))
             [
               "haitunwan_proxy_on"
               "clash_proxy_on"
@@ -252,8 +252,8 @@
           other_zshenv=${pkgs.lib.escapeShellArg (toString otherTestZshenv)}
           test_starship=${pkgs.lib.escapeShellArg (toString testStarship)}
           other_starship=${pkgs.lib.escapeShellArg (toString otherTestStarship)}
-          proxy_source=${pkgs.lib.escapeShellArg (toString ./zsh/proxy.zsh)}
-          zsh_module=${pkgs.lib.escapeShellArg (toString ./zsh/default.nix)}
+          proxy_source=${pkgs.lib.escapeShellArg (toString ./scripts/proxy.zsh)}
+          zsh_module=${pkgs.lib.escapeShellArg (toString ./zsh.nix)}
 
           for generated in \
             "$test_zshrc" "$test_zprofile" "$test_zshenv" "$test_starship" \
@@ -325,8 +325,8 @@
             ${self}/scripts/*.sh \
             ${self}/tests/shell/*.sh
           nixpkgs-fmt --check ${self}/flake.nix ${self}/configuration.nix \
-            ${self}/home.nix ${self}/zsh/default.nix
-          zsh -n ${self}/zsh/proxy.zsh
+            ${self}/home.nix ${self}/zsh.nix
+          zsh -n ${self}/scripts/proxy.zsh
           touch "$out"
         '';
       };
