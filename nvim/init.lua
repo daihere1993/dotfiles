@@ -178,6 +178,11 @@ end
 -- basic keymaps
 -- ============================================================
 do
+  -- [[ Custom Keymaps ]]
+  -- Move current line up/down
+  vim.keymap.set("n", "<A-k>", ":m .-2<CR>==")
+  vim.keymap.set("n", "<A-j>", ":m .+1<CR>==")
+
   -- [[ Basic Keymaps ]]
   --  See `:help vim.keymap.set()`
 
