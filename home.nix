@@ -148,9 +148,7 @@ in
   home.file = agentRuleFiles // agentSkillFiles // {
     ".config/nvim".source =
       config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/nvim";
-    ".config/wezterm" = {
-      force = true;
-      source = config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/wezterm";
-    };
+    ".config/wezterm".source =
+      config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/wezterm";
   };
 }
