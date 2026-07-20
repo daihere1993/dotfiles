@@ -1,68 +1,81 @@
 ---
 name: brainstorming
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: "Turn ambiguous product or feature ideas into an approved design before implementation. Use when the user asks to brainstorm, explore, compare, or design a change, or when a requested change has unresolved product, UX, architecture, API, data-model, scope, or trade-off decisions. Skip questions, explanations, reviews, diagnosis, well-scoped bug fixes, mechanical refactors, config or dependency updates, documentation or test-only changes, and implementation from an approved spec or explicit acceptance criteria."
 ---
 
 # Brainstorming Ideas Into Designs
 
-Help turn ideas into fully formed designs and specs through natural collaborative dialogue.
+Turn ambiguous ideas into clear designs and specs through natural collaborative dialogue.
 
-Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design and get user approval.
+Start by understanding the current project context and deciding whether any material design questions remain. Ask only the questions that can change the design. Once the design is clear, present it at a depth proportional to the change and get user approval.
 
 <HARD-GATE>
-Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity.
+Use this workflow only while material product, UX, architecture, API, data-model, scope, or trade-off decisions remain unresolved.
+
+If repository evidence, an approved design, or explicit acceptance criteria already determine the expected behavior, exit this skill and proceed with the requested task without an additional design-approval gate.
+
+Do not implement while a material design decision remains unresolved.
 </HARD-GATE>
 
-## Anti-Pattern: "This Is Too Simple To Need A Design"
+## Triage Before Brainstorming
 
-Every project goes through this process. A todo list, a single-function utility, a config change — all of them. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short (a few sentences for truly simple projects), but you MUST present it and get approval.
+Use the brainstorming workflow when either condition is true:
+
+- The user explicitly asks to brainstorm, explore, compare, or design an idea.
+- Reasonable implementations would differ materially in user-visible behavior, public interfaces, data models, architecture, scope, or long-term trade-offs, and existing context does not resolve the choice.
+
+Exit the skill when the request is already well specified or only requires explanation, diagnosis, or a mechanical change. For bug reports, reproduce and diagnose the problem first. Brainstorm only if the intended behavior remains unclear after diagnosis.
+
+Do not confuse code changes with design decisions. A small code diff can contain a material product decision; a large mechanical migration may contain none.
 
 ## Checklist
 
-You MUST create a task for each of these items and complete them in order:
+When brainstorming applies, track these items in order and skip conditional items that do not apply:
 
 1. **Explore project context** — check files, docs, recent commits
-2. **Offer the visual companion just-in-time** — NOT upfront. The first time a question would genuinely be clearer shown than described, offer it then (its own message); on approval its browser tab opens for you. If no visual question ever arises, never offer it. See the Visual Companion section below.
-3. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
-4. **Propose 2-3 approaches** — with trade-offs and your recommendation
-5. **Present design** — in sections scaled to their complexity, get user approval after each section
-6. **Ask whether to write a spec** — after design approval, let the user choose whether to persist it
-7. **Write design doc (if requested)** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md`
-8. **Spec self-review (if written)** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
-9. **User reviews written spec (if written)** — ask user to review the spec file before proceeding
-10. **Transition to implementation** — invoke writing-plans skill to create implementation plan
+2. **Confirm applicability** — exit if no material design decision remains
+3. **Offer the visual companion just-in-time** — only when a question would genuinely be clearer shown than described; see the Visual Companion section below
+4. **Ask necessary clarifying questions** — one at a time, focusing on answers that can change the design
+5. **Compare genuine approaches when useful** — explain meaningful trade-offs and give a recommendation; do not invent alternatives to satisfy a quota
+6. **Present the design** — scale it to the decision and get approval for material choices
+7. **Offer to persist substantial designs** — ask whether to write a spec when a durable document would add value
+8. **Write and self-review the spec (if requested)** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md`, then check placeholders, contradictions, ambiguity, and scope
+9. **Ask the user to review the written spec (if written)**
+10. **Transition to the appropriate implementation or planning workflow**
 
 ## Process Flow
 
 ```dot
 digraph brainstorming {
     "Explore project context" [shape=box];
-    "Ask clarifying questions" [shape=box];
-    "Propose 2-3 approaches" [shape=box];
-    "Present design sections" [shape=box];
+    "Material design decision?" [shape=diamond];
+    "Proceed with requested task" [shape=doublecircle];
+    "Clarify and compare as needed" [shape=box];
+    "Present proportionate design" [shape=box];
     "User approves design?" [shape=diamond];
-    "Write a spec?" [shape=diamond];
+    "Would a spec add value?" [shape=diamond];
     "Write design doc" [shape=box];
     "Spec self-review\n(fix inline)" [shape=box];
     "User reviews spec?" [shape=diamond];
-    "Invoke writing-plans skill" [shape=doublecircle];
+    "Plan or implement" [shape=doublecircle];
 
-    "Explore project context" -> "Ask clarifying questions";
-    "Ask clarifying questions" -> "Propose 2-3 approaches";
-    "Propose 2-3 approaches" -> "Present design sections";
-    "Present design sections" -> "User approves design?";
-    "User approves design?" -> "Present design sections" [label="no, revise"];
-    "User approves design?" -> "Write a spec?" [label="yes"];
-    "Write a spec?" -> "Write design doc" [label="yes"];
-    "Write a spec?" -> "Invoke writing-plans skill" [label="no"];
+    "Explore project context" -> "Material design decision?";
+    "Material design decision?" -> "Proceed with requested task" [label="no"];
+    "Material design decision?" -> "Clarify and compare as needed" [label="yes"];
+    "Clarify and compare as needed" -> "Present proportionate design";
+    "Present proportionate design" -> "User approves design?";
+    "User approves design?" -> "Present proportionate design" [label="no, revise"];
+    "User approves design?" -> "Would a spec add value?" [label="yes"];
+    "Would a spec add value?" -> "Write design doc" [label="yes, user agrees"];
+    "Would a spec add value?" -> "Plan or implement" [label="no"];
     "Write design doc" -> "Spec self-review\n(fix inline)";
     "Spec self-review\n(fix inline)" -> "User reviews spec?";
     "User reviews spec?" -> "Write design doc" [label="changes requested"];
-    "User reviews spec?" -> "Invoke writing-plans skill" [label="approved"];
+    "User reviews spec?" -> "Plan or implement" [label="approved"];
 }
 ```
 
-**The terminal state is invoking writing-plans.** Do NOT invoke frontend-design, mcp-builder, or any other implementation skill. The ONLY skill you invoke after brainstorming is writing-plans.
+The terminal state is an approved design or a determination that no design work is needed. Use a planning skill when one is available and the task warrants a detailed plan; otherwise continue through the normal workflow requested by the user.
 
 ## The Process
 
@@ -71,23 +84,24 @@ digraph brainstorming {
 - Check out the current project state first (files, docs, recent commits)
 - Before asking detailed questions, assess scope: if the request describes multiple independent subsystems (e.g., "build a platform with chat, file storage, billing, and analytics"), flag this immediately. Don't spend questions refining details of a project that needs to be decomposed first.
 - If the project is too large for a single spec, help the user decompose into sub-projects: what are the independent pieces, how do they relate, what order should they be built? Then brainstorm the first sub-project through the normal design flow. Each sub-project gets its own spec → plan → implementation cycle.
-- For appropriately-scoped projects, ask questions one at a time to refine the idea
+- For appropriately-scoped projects, ask questions one at a time only when the answers can change the design
 - Prefer multiple choice questions when possible, but open-ended is fine too
-- Only one question per message - if a topic needs more exploration, break it into multiple questions
+- Ask only one question per message; if a topic needs more exploration, break it into multiple questions
 - Focus on understanding: purpose, constraints, success criteria
 
 **Exploring approaches:**
 
-- Propose 2-3 different approaches with trade-offs
+- Compare 2-3 approaches only when they represent genuine choices
+- For a straightforward decision with one clearly suitable approach, explain that approach and its main consequence without inventing alternatives
 - Present options conversationally with your recommendation and reasoning
 - Lead with your recommended option and explain why
 
 **Presenting the design:**
 
 - Once you believe you understand what you're building, present the design
-- Scale each section to its complexity: a few sentences if straightforward, up to 200-300 words if nuanced
-- Ask after each section whether it looks right so far
-- Cover: architecture, components, data flow, error handling, testing
+- Scale the design to its complexity: a short paragraph for a small decision, structured sections for a substantial change
+- Ask for one overall approval on small designs; validate substantial designs section by section when incremental feedback reduces rework
+- Cover only relevant concerns, such as architecture, components, data flow, error handling, migration, and testing
 - Be ready to go back and clarify if something doesn't make sense
 
 **Design for isolation and clarity:**
@@ -107,8 +121,9 @@ digraph brainstorming {
 
 **Documentation:**
 
-- After the user approves the design, ask whether they want it saved as a spec before creating any spec file
-- If they decline, skip spec creation, self-review, and the written-spec review gate; proceed directly to implementation planning
+- After the user approves a substantial design, ask whether they want it saved as a spec before creating any spec file
+- For a small design, skip spec creation unless the user asks to preserve it
+- If they decline, skip spec creation, self-review, and the written-spec review gate; proceed to the appropriate planning or implementation workflow
 - If they accept, write the validated design (spec) to `docs/specs/YYYY-MM-DD-<topic>-design.md`
   - User preferences for spec location override this default
 - Use elements-of-style:writing-clearly-and-concisely skill if available
@@ -127,22 +142,24 @@ Fix any issues inline. No need to re-review — just fix and move on.
 **User Review Gate:**
 After the spec review loop passes, ask the user to review the written spec before proceeding:
 
-> "Spec written to `<path>`. Please review it and let me know if you want to make any changes before we start writing out the implementation plan."
+> "Spec written to `<path>`. Please review it and let me know if you want any changes before we move to planning or implementation."
 
 Wait for the user's response. If they request changes, make them and re-run the spec review loop. Only proceed once the user approves.
 
 **Implementation:**
 
-- Invoke the writing-plans skill to create a detailed implementation plan
-- Do NOT invoke any other skill. writing-plans is the next step.
+- Use a planning skill if one is available and the approved design needs a detailed implementation plan
+- Otherwise proceed with the implementation workflow that matches the user's request
 
 ## Key Principles
 
-- **One question at a time** - Don't overwhelm with multiple questions
+- **Triage first** - Use brainstorming only for unresolved, material design decisions
+- **One question at a time, when needed** - Don't ask questions that existing context already answers
 - **Multiple choice preferred** - Easier to answer than open-ended when possible
 - **YAGNI ruthlessly** - Remove unnecessary features from all designs
-- **Explore alternatives** - Always propose 2-3 approaches before settling
-- **Incremental validation** - Present design, get approval before moving on
+- **Explore real alternatives** - Compare options only when their trade-offs matter
+- **Proportionate process** - Match the depth of design and approval to the uncertainty and impact
+- **Incremental validation** - Get approval before implementing unresolved material decisions
 - **Be flexible** - Go back and clarify when something doesn't make sense
 
 ## Visual Companion
