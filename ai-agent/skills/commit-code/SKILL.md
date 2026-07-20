@@ -123,6 +123,29 @@ EOF
 - Before running `git commit`, inspect the complete message and verify that it contains no prohibited attribution.
 - After committing, verify the stored message with `git log -1 --format=%B`.
 
+### Cursor agent attribution
+
+Cursor may inject `Co-authored-by: Cursor <cursoragent@cursor.com>` when
+`attribution.attributeCommitsToAgent` is `true` in `~/.cursor/cli-config.json`.
+`git commit` and `git commit --amend` both get the trailer re-added through
+the agent shell.
+
+Prefer keeping `attributeCommitsToAgent` and `attributePRsToAgent` set to
+`false`. If a commit still needs rewriting without attribution, use
+`git commit-tree` instead of `git commit`:
+
+```bash
+TREE=$(git rev-parse 'HEAD^{tree}')
+PARENT=$(git rev-parse 'HEAD^')
+NEW=$(git commit-tree "$TREE" -p "$PARENT" -m "$(cat <<'EOF'
+<type>[scope]: <description>
+
+<optional body>
+EOF
+)")
+git update-ref refs/heads/<branch> "$NEW"
+```
+
 ## Git Safety Protocol
 
 - NEVER update git config

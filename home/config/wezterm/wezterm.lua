@@ -4,7 +4,10 @@ local act = wezterm.action
 local config = wezterm.config_builder()
 
 config.color_scheme = "rose-pine-moon"
-config.font = wezterm.font("Hack Nerd Font")
+config.font = wezterm.font_with_fallback({
+  { family = "Hack Nerd Font" },
+  { family = "Sarasa Gothic SC" },
+})
 config.font_size = 15.0
 config.window_background_opacity = 0.8
 config.macos_window_background_blur = 50

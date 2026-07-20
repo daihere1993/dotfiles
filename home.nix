@@ -71,8 +71,9 @@ in
       tree-sitter
       gnumake
       unzip
-      # The font everything renders in
+      # Terminal fonts: Latin/icons plus CJK fallback for WezTerm.
       nerd-fonts.hack
+      sarasa-gothic
     ];
   };
   fonts.fontconfig.enable = true;
