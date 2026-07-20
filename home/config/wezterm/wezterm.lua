@@ -1,4 +1,5 @@
 local wezterm = require("wezterm")
+local act = wezterm.action
 
 local config = wezterm.config_builder()
 
@@ -19,6 +20,21 @@ config.window_padding = {
 
 -- Let Cmd+Q quit immediately instead of opening WezTerm's confirmation overlay.
 config.window_close_confirmation = "NeverPrompt"
+
+-- macOS-style line navigation in the shell (Ctrl+a / Ctrl+e).
+config.keys = {
+  { key = "LeftArrow", mods = "SUPER", action = act.SendKey({ key = "a", mods = "CTRL" }) },
+  { key = "RightArrow", mods = "SUPER", action = act.SendKey({ key = "e", mods = "CTRL" }) },
+  { key = "Backspace", mods = "SUPER", action = act.SendKey({ key = "u", mods = "CTRL" }) },
+  {
+    key = "k",
+    mods = "SUPER",
+    action = act.Multiple({
+      act.ClearScrollback("ScrollbackAndViewport"),
+      act.SendKey({ key = "L", mods = "CTRL" }),
+    }),
+  },
+}
 
 -- These logical dimensions match the initial outer window size for the font and
 -- window settings above. Supplying the position to spawn_window places the first
