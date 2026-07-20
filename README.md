@@ -176,9 +176,11 @@ git add ai-agent/skills/<skill-id>
 ~/.dotfiles/scripts/rebuild.sh
 ```
 
-Dotfiles owns only skill IDs present in this repository. A rebuild replaces a
-same-name file, link, or directory without backup; unrelated local skills stay
-untouched. External skills and per-platform skill profiles are not supported.
+Dotfiles owns only skill IDs present in this repository. A rebuild force-replaces
+same-name files and links without backup. If a managed skill path already exists
+as a real directory, delete it manually before rebuilding. Unrelated local
+skills stay untouched. External skills and per-platform skill profiles are not
+supported.
 
 ## Git and SSH
 

@@ -309,10 +309,9 @@
           } ''
           shellcheck \
             ${self}/scripts/*.sh \
-            ${self}/tests/shell/*.sh \
-            ${self}/ai-agent/remove-conflicting-skill-directory.sh
+            ${self}/tests/shell/*.sh
           nixpkgs-fmt --check ${self}/flake.nix ${self}/configuration.nix \
-            ${self}/home.nix ${self}/ai-agent/default.nix ${self}/zsh/default.nix
+            ${self}/home.nix ${self}/zsh/default.nix
           zsh -n ${self}/zsh/proxy.zsh
           touch "$out"
         '';
