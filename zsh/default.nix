@@ -44,6 +44,8 @@
       add = "git add .";
       push = "git push";
       pull = "git pull";
+      cc = "claude --dangerously-skip-permissions";
+      co = "codex --dangerously-bypass-approvals-and-sandbox";
     };
 
     # Keep a managed login file even though no login-only initialization is needed.
