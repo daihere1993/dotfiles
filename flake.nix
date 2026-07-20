@@ -171,6 +171,20 @@
           assert testConfiguration.config.homebrew.enable;
           assert testConfiguration.config.homebrew.onActivation.cleanup == "none";
           assert builtins.elem "wezterm" (map (cask: cask.name) testConfiguration.config.homebrew.casks);
+          assert pkgs.lib.all
+            (path: pkgs.lib.hasInfix path
+              testConfiguration.config.system.activationScripts.postActivation.text)
+            [
+              "completions/bash/brew"
+              "completions/fish/brew.fish"
+              "completions/zsh/_brew"
+              "/opt/homebrew/etc/bash_completion.d/brew"
+              "/opt/homebrew/share/fish/vendor_completions.d/brew.fish"
+              "/opt/homebrew/share/zsh/site-functions/_brew"
+              "/opt/homebrew/share/doc/homebrew"
+              "/opt/homebrew/share/man/man1/README.md"
+              "/opt/homebrew/share/man/man1/brew.1"
+            ];
           assert otherTestConfiguration.config.nix-homebrew.user == otherTestMachine.username;
           pkgs.runCommand "dotfiles-homebrew-configuration" { } ''
             touch "$out"
