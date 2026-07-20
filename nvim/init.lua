@@ -180,15 +180,15 @@ end
 do
   -- [[ Custom Keymaps ]]
   -- Move current line up/down
-  vim.keymap.set("n", "<A-k>", ":m .-2<CR>==")
-  vim.keymap.set("n", "<A-j>", ":m .+1<CR>==")
+  vim.keymap.set('n', '<A-k>', ':m .-2<CR>==')
+  vim.keymap.set('n', '<A-j>', ':m .+1<CR>==')
+  -- Clear search highlights and save by pressing Escape
+  vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR><cmd>write<CR>', { desc = 'Clear search highlight and save' })
+  -- Select all
+  vim.keymap.set('n', '<C-a>', 'ggVG', { desc = 'Select all' })
 
   -- [[ Basic Keymaps ]]
   --  See `:help vim.keymap.set()`
-
-  -- Clear highlights on search when pressing <Esc> in normal mode
-  --  See `:help hlsearch`
-  vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
   -- Diagnostic Config & Keymaps
   --  See `:help vim.diagnostic.Opts`
