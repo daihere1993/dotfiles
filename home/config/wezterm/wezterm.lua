@@ -3,6 +3,66 @@ local act = wezterm.action
 
 local config = wezterm.config_builder()
 
+local smart_paste_dir = (os.getenv("TMPDIR") or "/tmp") .. "/wezterm-clipboard-images"
+
+local function clipboard_has_image()
+  local success, stdout = wezterm.run_child_process({
+    "/usr/bin/osascript",
+    "-e",
+    "clipboard info",
+  })
+
+  return success
+    and stdout ~= nil
+    and (stdout:find("PNGf", 1, true) ~= nil
+      or stdout:find("TIFF", 1, true) ~= nil
+      or stdout:find("JPEG", 1, true) ~= nil)
+end
+
+local function save_clipboard_image()
+  local created = wezterm.run_child_process({ "/bin/mkdir", "-p", smart_paste_dir })
+  if not created then
+    return nil
+  end
+
+  local success, path = wezterm.run_child_process({
+    "/usr/bin/mktemp",
+    smart_paste_dir .. "/paste-XXXXXX.png",
+  })
+  if not success or path == nil then
+    return nil
+  end
+
+  path = path:gsub("[\r\n]+$", "")
+  local script = [[
+on run argv
+  set imagePath to POSIX file (item 1 of argv)
+  set imageData to the clipboard as «class PNGf»
+  set fileRef to open for access imagePath with write permission
+  try
+    set eof fileRef to 0
+    write imageData to fileRef
+    close access fileRef
+  on error errorMessage number errorNumber
+    close access fileRef
+    error errorMessage number errorNumber
+  end try
+end run
+]]
+  local saved = wezterm.run_child_process({
+    "/usr/bin/osascript",
+    "-e",
+    script,
+    path,
+  })
+  if saved then
+    return path
+  end
+
+  os.remove(path)
+  return nil
+end
+
 config.color_scheme = "rose-pine-moon"
 config.font = wezterm.font_with_fallback({
   { family = "Hack Nerd Font" },
@@ -29,6 +89,26 @@ config.keys = {
   { key = "LeftArrow", mods = "SUPER", action = act.SendKey({ key = "a", mods = "CTRL" }) },
   { key = "RightArrow", mods = "SUPER", action = act.SendKey({ key = "e", mods = "CTRL" }) },
   { key = "Backspace", mods = "SUPER", action = act.SendKey({ key = "u", mods = "CTRL" }) },
+  {
+    key = "v",
+    mods = "SUPER",
+    action = wezterm.action_callback(function(window, pane)
+      if not clipboard_has_image() then
+        window:perform_action(act.PasteFrom("Clipboard"), pane)
+        return
+      end
+
+      local path = save_clipboard_image()
+      if path then
+        pane:send_paste(path)
+        window:toast_notification("Smart Paste", "Image saved: " .. path, nil, 3000)
+        return
+      end
+
+      window:toast_notification("Smart Paste", "Could not save clipboard image", nil, 3000)
+      window:perform_action(act.PasteFrom("Clipboard"), pane)
+    end),
+  },
   {
     key = "k",
     mods = "SUPER",
