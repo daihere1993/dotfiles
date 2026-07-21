@@ -149,8 +149,8 @@ in
   home.file = agentRuleFiles // agentSkillFiles // {
     ".config/nvim".source =
       config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/home/config/nvim";
-    ".config/herdr".source =
-      config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/home/config/herdr";
+    ".config/herdr/config.toml".source =
+      config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/home/config/herdr/config.toml";
     ".config/wezterm".source =
       config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/home/config/wezterm";
   };
