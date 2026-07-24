@@ -1,2 +1,11 @@
+onboarding = false
 [keys]
 switch_tab = "prefix+1..9"
+
+[theme]
+name = "gruvbox"
+auto_switch = false
+
+[ui]
+show_agent_labels_on_pane_borders = false
+agent_panel_sort = "spaces"
