@@ -46,9 +46,8 @@ stream, and custom rollback are no longer available.
 ## Zsh
 
 Home Manager is the only source of zsh configuration. The declarations live in
-`zsh.nix`, and the version-controlled proxy functions live in
-`scripts/proxy.zsh`. Do not edit the generated `~/.zshrc`, `~/.zprofile`, or
-`~/.zshenv` files. Change the tracked sources, validate them, then rebuild:
+`zsh.nix`. Do not edit the generated `~/.zshrc`, `~/.zprofile`, or `~/.zshenv`
+files. Change the tracked sources, validate them, then rebuild:
 
 ```sh
 nix flake check
@@ -65,20 +64,6 @@ tools in that project's flake or development shell. Use `home.sessionPath` only
 for a stable external path that Nix cannot provide. Put shell initialization in
 `zsh.nix` or a focused managed script instead of editing generated
 files.
-
-The following proxy commands are available but are never run during shell
-startup:
-
-```text
-haitunwan_proxy_on
-clash_proxy_on
-disable_socks_proxy
-proxy_off
-```
-
-They modify the current shell and may also modify macOS network, Git, npm,
-pnpm, VS Code, and Cursor settings. Confirm those side effects before using
-them.
 
 Store the Cursor API key in the login keychain as an application password with
 service `nok-cursor-api-key` and account equal to the macOS username. Create or

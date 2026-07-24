@@ -62,8 +62,6 @@
           -a "$USER" -s nok-cursor-api-key -w 2>/dev/null) || return 0
         [[ -n "$cursor_api_key" ]] && export CURSOR_API_KEY="$cursor_api_key"
       }
-
-      source ${./scripts/proxy.zsh}
     '';
   };
 

@@ -230,14 +230,6 @@
           in
           assert validateZsh testHome;
           assert validateZsh otherTestHome;
-          assert pkgs.lib.all
-            (name: pkgs.lib.hasInfix "${name}()" (builtins.readFile ./scripts/proxy.zsh))
-            [
-              "haitunwan_proxy_on"
-              "clash_proxy_on"
-              "disable_socks_proxy"
-              "proxy_off"
-            ];
           pkgs.runCommand "dotfiles-zsh-configuration" { } ''
             touch "$out"
           '';
@@ -254,7 +246,6 @@
           other_zshenv=${pkgs.lib.escapeShellArg (toString otherTestZshenv)}
           test_starship=${pkgs.lib.escapeShellArg (toString testStarship)}
           other_starship=${pkgs.lib.escapeShellArg (toString otherTestStarship)}
-          proxy_source=${pkgs.lib.escapeShellArg (toString ./scripts/proxy.zsh)}
           zsh_module=${pkgs.lib.escapeShellArg (toString ./zsh.nix)}
 
           for generated in \
@@ -269,21 +260,12 @@
             "$other_zshrc" "$other_zprofile" "$other_zshenv"
           ! grep -F 'otheruser' "$test_zshrc" "$test_zprofile" "$test_zshenv"
           ! grep -F 'testuser' "$other_zshrc" "$other_zprofile" "$other_zshenv"
-          ! grep -F '/Users/' "$proxy_source" "$zsh_module"
+          ! grep -F '/Users/' "$zsh_module"
 
           grep -F -- '-a "$USER" -s nok-cursor-api-key -w' "$test_zshrc"
-          grep -E '^source /nix/store/.+-proxy\.zsh$' "$test_zshrc"
           grep -F 'starship init zsh' "$test_zshrc"
           grep -F 'format = ' "$test_starship"
 
-          for function_name in \
-            haitunwan_proxy_on clash_proxy_on \
-            disable_socks_proxy proxy_off; do
-            grep -F "$function_name()" "$proxy_source"
-          done
-
-          ! grep -E '^[[:space:]]*(haitunwan_proxy_on|clash_proxy_on|disable_socks_proxy|proxy_off)([[:space:]]|$)' \
-            "$test_zshrc" "$other_zshrc"
           ! grep -E 'oh-my-zsh\.sh|ZSH_THEME=|powerlevel10k|\.p10k\.zsh|NVM_DIR|pyenv|PNPM_HOME|\.yarn/|flutter/bin|depot_tools|windsurf/bin|Python\.framework|brew shellenv|alias (python|ninja|gn)=' \
             "$test_zshrc" "$test_zprofile" "$test_zshenv" \
             "$other_zshrc" "$other_zprofile" "$other_zshenv"
@@ -328,7 +310,6 @@
             ${self}/tests/shell/*.sh
           nixpkgs-fmt --check ${self}/flake.nix ${self}/configuration.nix \
             ${self}/home.nix ${self}/zsh.nix
-          zsh -n ${self}/scripts/proxy.zsh
           touch "$out"
         '';
       };
