@@ -222,6 +222,8 @@
               assert home.programs.starship.enable;
               assert home.programs.starship.enableZshIntegration;
               assert home.programs.starship.settings.git_branch.symbol == "";
+              assert !home.programs.starship.settings.git_metrics.disabled;
+              assert pkgs.lib.hasInfix "$git_status$git_metrics" home.programs.starship.settings.format;
               assert pkgs.lib.hasInfix "nok-cursor-api-key" home.programs.zsh.initContent;
               assert pkgs.lib.hasInfix ''-a "$USER"'' home.programs.zsh.initContent;
               true;
