@@ -69,7 +69,9 @@ Store the Cursor API key in the login keychain as an application password with
 service `nok-cursor-api-key` and account equal to the macOS username. Create or
 update it through Keychain Access so the value never appears in a command-line
 argument, Git, the Nix store, or logs. A shell preserves an inherited non-empty
-`CURSOR_API_KEY`; otherwise it silently queries that keychain item.
+`CURSOR_API_KEY`; otherwise it silently queries that keychain item. Cursor CLI
+uses its file credential backend so API-key authentication does not depend on a
+separate saved-login item in the macOS keychain.
 
 Home Manager force-replaces existing `~/.zshrc`, `~/.zprofile`, and `~/.zshenv`
 files during activation. Rebuild does not back them up. Copy any content you

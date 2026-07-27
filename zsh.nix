@@ -54,6 +54,9 @@
     '';
 
     initContent = ''
+      # API-key authentication must not depend on Cursor's saved-login keychain entry.
+      export AGENT_CLI_CREDENTIAL_STORE=file
+
       () {
         [[ -n "''${CURSOR_API_KEY-}" ]] && return 0
 
