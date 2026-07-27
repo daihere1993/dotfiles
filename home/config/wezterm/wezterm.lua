@@ -29,6 +29,7 @@ config.keys = {
   { key = "LeftArrow", mods = "SUPER", action = act.SendKey({ key = "a", mods = "CTRL" }) },
   { key = "RightArrow", mods = "SUPER", action = act.SendKey({ key = "e", mods = "CTRL" }) },
   { key = "Backspace", mods = "SUPER", action = act.SendKey({ key = "u", mods = "CTRL" }) },
+  { key = "phys:Delete", mods = "SUPER", action = act.SendKey({ key = "u", mods = "CTRL" }) },
   {
     key = "k",
     mods = "SUPER",
