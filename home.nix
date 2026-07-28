@@ -96,6 +96,14 @@ in
     includes = [{ path = "~/.config/git/local.inc"; }];
   };
 
+  # Terminal Git UI; installs the binary and manages ~/.config/lazygit/config.yml.
+  programs.lazygit = {
+    enable = true;
+    settings = {
+      gui.nerdFontsVersion = "3"; # Reuse the already-installed nerd-fonts.hack.
+    };
+  };
+
   # Provide safe shared SSH defaults while allowing private hosts in an untracked file.
   programs.ssh = {
     enable = true;
