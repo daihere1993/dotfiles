@@ -71,7 +71,24 @@ Perform a structured review of the current git changes with focus on SOLID, arch
   - **Boundary conditions**: null/undefined handling, empty collections, numeric boundaries, off-by-one
 - Flag issues that may cause silent failures or production incidents.
 
-### 6) Output format
+### 6) Documentation consistency
+
+Determine whether the reviewed change alters any documented contract:
+
+- user-visible behavior
+- public API, IPC, CLI, configuration, or environment variables
+- persisted data format or migration behavior
+- architecture, ownership, or dependency boundaries
+- build, test, deploy, backup, restore, or release procedures
+- repository-specific engineering policies
+
+Read the repository's documentation map and current authoritative document when available. Report a documentation-drift finding only when an existing current document would become wrong, misleading, or omit a required action.
+
+Do not require documentation changes for behavior-preserving refactors, tests-only changes, formatting, private implementation details, generated files, changelogs, or historical design documents unless the repository explicitly defines otherwise. Prefer updating one authoritative document over synchronizing duplicated prose.
+
+Classify drift severity by impact: incorrect recovery, security, deployment, or data-loss instructions can block merge; a missing non-critical usage note is normally lower severity.
+
+### 7) Output format
 
 Structure your review as follows:
 
@@ -121,7 +138,7 @@ Description of the issue and suggested fix.
 - Any areas not covered (e.g., "Did not verify database migrations")
 - Residual risks or recommended follow-up tests
 
-### 7) Next steps confirmation
+### 8) Next steps confirmation
 
 After presenting findings, ask user how to proceed:
 
