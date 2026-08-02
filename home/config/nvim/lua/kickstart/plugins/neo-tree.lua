@@ -9,8 +9,11 @@ vim.pack.add {
 
 vim.keymap.set('n', '\\', '<Cmd>Neotree reveal<CR>', { desc = 'NeoTree reveal', silent = true })
 
+local file_ignore = require 'custom.file_ignore'
+
 require('neo-tree').setup {
   filesystem = {
+    filtered_items = file_ignore.neo_tree_filtered_items(),
     window = {
       mappings = {
         ['\\'] = 'close_window',

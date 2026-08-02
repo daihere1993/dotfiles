@@ -497,16 +497,17 @@ do
   vim.pack.add(telescope_plugins)
 
   -- See `:help telescope` and `:help telescope.setup()`
+  local file_ignore = require 'custom.file_ignore'
+
   require('telescope').setup {
-    -- You can put your default mappings / updates / etc. in here
-    --  All the info you're looking for is in `:help telescope.setup()`
-    --
-    -- defaults = {
-    --   mappings = {
-    --     i = { ['<c-enter>'] = 'to_fuzzy_refine' },
-    --   },
-    -- },
-    -- pickers = {}
+    defaults = {
+      file_ignore_patterns = file_ignore.telescope_patterns(),
+    },
+    pickers = {
+      find_files = { hidden = true },
+      live_grep = { hidden = true },
+      grep_string = { hidden = true },
+    },
     extensions = {
       ['ui-select'] = { require('telescope.themes').get_dropdown() },
     },
