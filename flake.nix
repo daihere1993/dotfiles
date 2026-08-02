@@ -266,6 +266,7 @@
 
           grep -F -- '-a "$USER" -s nok-cursor-api-key -w' "$test_zshrc"
           grep -F 'starship init zsh' "$test_zshrc"
+          grep -F '.config/zsh/local.inc' "$test_zshrc"
           grep -F 'format = ' "$test_starship"
 
           ! grep -E 'oh-my-zsh\.sh|ZSH_THEME=|powerlevel10k|\.p10k\.zsh|NVM_DIR|pyenv|PNPM_HOME|\.yarn/|flutter/bin|depot_tools|windsurf/bin|Python\.framework|brew shellenv|alias (python|ninja|gn)=' \

@@ -63,7 +63,19 @@ Add executables needed by every project to `home.packages`. Put project-only
 tools in that project's flake or development shell. Use `home.sessionPath` only
 for a stable external path that Nix cannot provide. Put shell initialization in
 `zsh.nix` or a focused managed script instead of editing generated
-files.
+files. For machine-local environment variables, aliases, or other shell
+overrides, create an untracked file:
+
+```sh
+mkdir -p ~/.config/zsh
+```
+
+```text
+~/.config/zsh/local.inc
+```
+
+Home Manager sources it from the generated `~/.zshrc` when the file exists.
+Rebuild does not create, replace, back up, or delete it.
 
 Store the Cursor API key in the login keychain as an application password with
 service `nok-cursor-api-key` and account equal to the macOS username. Create or
@@ -178,6 +190,7 @@ deleted:
 
 ```text
 ~/.config/git/local.inc
+~/.config/zsh/local.inc
 ~/.ssh/config.local
 ```
 

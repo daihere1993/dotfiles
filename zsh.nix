@@ -65,6 +65,9 @@
           -a "$USER" -s nok-cursor-api-key -w 2>/dev/null) || return 0
         [[ -n "$cursor_api_key" ]] && export CURSOR_API_KEY="$cursor_api_key"
       }
+
+      # Machine-local shell overrides stay in an untracked file; see README.
+      [[ -f "$HOME/.config/zsh/local.inc" ]] && source "$HOME/.config/zsh/local.inc"
     '';
   };
 
