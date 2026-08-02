@@ -42,6 +42,8 @@
     shellAliases = {
       ".." = "cd ..";
       add = "git add .";
+      gs = "git status";
+      gl = "git log --oneline --graph --decorate -20";
       push = "git push";
       pull = "git pull";
       cc = "claude --dangerously-skip-permissions";
