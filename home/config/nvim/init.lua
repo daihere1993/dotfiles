@@ -187,6 +187,14 @@ do
   -- Select all
   vim.keymap.set('n', '<C-a>', 'ggVG', { desc = 'Select all' })
 
+  -- Copy filename / absolute directory to system clipboard
+  vim.keymap.set('n', '<leader>yf', function()
+    vim.fn.setreg('+', vim.fn.expand '%:t')
+  end, { desc = 'Copy [F]ilename' })
+  vim.keymap.set('n', '<leader>yd', function()
+    vim.fn.setreg('+', vim.fn.expand '%:p:h')
+  end, { desc = 'Copy absolute [D]irectory' })
+
   -- [[ Basic Keymaps ]]
   --  See `:help vim.keymap.set()`
 
@@ -375,6 +383,7 @@ do
     -- Document existing key chains
     spec = {
       { '<leader>s', group = '[S]earch', mode = { 'n', 'v' } },
+      { '<leader>y', group = 'Cop[Y] to clipboard' },
       { '<leader>t', group = '[T]oggle' },
       { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } }, -- Enable gitsigns recommended keymaps first
       { 'gr', group = 'LSP Actions', mode = { 'n' } },
