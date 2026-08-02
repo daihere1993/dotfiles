@@ -162,6 +162,8 @@
             touch "$out"
           '';
 
+        bm-package = pkgs.callPackage "${self}/packages/bm.nix" { };
+
         homebrew-configuration =
           assert testConfiguration.config.nix-homebrew.enable;
           assert testConfiguration.config.nix-homebrew.user == testMachine.username;

@@ -48,6 +48,9 @@ let
       })
       skillRoots)
     skillIds);
+
+  # Mermaid renderer for Neovim markdown preview.
+  bm = pkgs.callPackage ./packages/bm.nix { };
 in
 {
   imports = [
@@ -71,6 +74,7 @@ in
       tree-sitter
       gnumake
       unzip
+      bm
       # Terminal fonts: Latin/icons plus CJK fallback for WezTerm.
       nerd-fonts.hack
       sarasa-gothic
