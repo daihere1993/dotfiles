@@ -114,6 +114,10 @@
           target = ".claude/CLAUDE.md";
           source = "${testMachine.homeDirectory}/.dotfiles/ai-agent/AGENTS.md";
         }
+        {
+          target = ".pi/agent/AGENTS.md";
+          source = "${testMachine.homeDirectory}/.dotfiles/ai-agent/AGENTS.md";
+        }
       ] ++ builtins.concatMap
         (skillId: map
           (root: {

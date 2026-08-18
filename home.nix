@@ -39,6 +39,7 @@ let
   agentRuleFiles = {
     ".codex/AGENTS.md" = mkOutOfStoreFile "ai-agent/AGENTS.md";
     ".claude/CLAUDE.md" = mkOutOfStoreFile "ai-agent/AGENTS.md";
+    ".pi/agent/AGENTS.md" = mkOutOfStoreFile "ai-agent/AGENTS.md";
   };
   agentSkillFiles = lib.listToAttrs (lib.concatMap
     (skillId: map
