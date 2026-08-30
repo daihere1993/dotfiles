@@ -26,6 +26,9 @@ config.window_close_confirmation = "NeverPrompt"
 
 -- macOS-style line navigation in the shell (Ctrl+a / Ctrl+e).
 config.keys = {
+  -- Free Alt+Enter for apps like Cursor Custom Mode; fullscreen on F11 instead.
+  { key = "Enter", mods = "ALT", action = act.DisableDefaultAssignment },
+  { key = "F11", action = act.ToggleFullScreen },
   { key = "LeftArrow", mods = "SUPER", action = act.SendKey({ key = "a", mods = "CTRL" }) },
   { key = "RightArrow", mods = "SUPER", action = act.SendKey({ key = "e", mods = "CTRL" }) },
   { key = "Backspace", mods = "SUPER", action = act.SendKey({ key = "u", mods = "CTRL" }) },
