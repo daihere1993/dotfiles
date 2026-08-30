@@ -194,6 +194,37 @@ deleted:
 ~/.ssh/config.local
 ```
 
+GitHub SSH uses `ssh.github.com:443` in the managed SSH configuration. When
+Clash Verge runs in TUN mode with fake-ip DNS, Git also needs matching Clash
+profile enhancements. Tracked merge and rules templates live at
+`home/config/clash-verge/`. Rebuild runs `scripts/sync-clash-verge.sh`, which
+symlinks the merge file and renders the rules template into the Clash Verge
+profiles directory when that application is installed.
+
+Machine-local Clash Verge profile UIDs and the proxy group name stay in an
+untracked file:
+
+```sh
+mkdir -p ~/.config/clash-verge
+```
+
+```text
+~/.config/clash-verge/local.inc
+```
+
+```sh
+CLASH_VERGE_MERGE_UID=mcHzRvxuE1Af
+CLASH_VERGE_RULES_UID=rgJovenHHCl1
+CLASH_VERGE_PROXY_GROUP='🔰 代理'
+```
+
+Create the merge and rules enhancement profiles once in Clash Verge, note their
+UIDs from `profiles.yaml`, and point the active subscription profile at those
+enhancements. Subscription URLs, selected nodes, and the generated runtime
+config remain outside this repository. After changing the tracked templates,
+run rebuild or `scripts/sync-clash-verge.sh`, then reload the active Clash
+Verge profile.
+
 ## Legacy cleanup
 
 Successful bootstrap and rebuild runs call cleanup automatically. To migrate an

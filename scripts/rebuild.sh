@@ -52,6 +52,7 @@ main() {
 
   sudo /usr/bin/env DOTFILES_MACHINE="$machine_file" "$darwin_rebuild" \
     switch --impure --flake "$DISCOVERED_HOME/.dotfiles#mac"
+  "$repository/scripts/sync-clash-verge.sh"
   "$repository/scripts/cleanup-legacy.sh" --yes
 }
 

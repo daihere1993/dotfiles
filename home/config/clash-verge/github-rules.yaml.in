@@ -1,0 +1,11 @@
+# GitHub routing rules for Clash Verge profile enhancement.
+# __PROXY_GROUP__ is substituted by scripts/sync-clash-verge.sh.
+
+prepend:
+  - DOMAIN,ssh.github.com,__PROXY_GROUP__
+  - DOMAIN-SUFFIX,github.com,__PROXY_GROUP__
+  - DOMAIN-SUFFIX,githubusercontent.com,__PROXY_GROUP__
+
+append: []
+
+delete: []

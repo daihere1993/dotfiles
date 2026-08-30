@@ -1,0 +1,12 @@
+# GitHub traffic fixes for Clash TUN + fake-ip + SSH-over-443.
+# Deployed by scripts/sync-clash-verge.sh into a Clash Verge merge profile.
+
+dns:
+  fake-ip-filter:
+    - '+.github.com'
+    - 'ssh.github.com'
+
+sniffer:
+  skip-domain:
+    - 'ssh.github.com'
+    - '+.github.com'
