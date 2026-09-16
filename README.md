@@ -1,7 +1,7 @@
 # dotfiles
 
 This repository is the source of truth for one Apple Silicon macOS system and
-for shared Codex, Claude Code, and Cursor skills. nix-darwin manages the system,
+for shared Codex, Claude Code, Cursor, and ZCode rules and skills. nix-darwin manages the system,
 Home Manager manages user configuration, and Git records content history.
 
 The repository does not manage credentials, private keys, sessions, vendor
@@ -149,11 +149,12 @@ the local configuration with `--impure`.
 ## Agent rules and skills
 
 Shared rules live at `ai-agent/AGENTS.md`. Home Manager creates
-out-of-store links for Codex and Claude:
+out-of-store links for each supported Agent:
 
 ```text
 ~/.codex/AGENTS.md   -> ~/.dotfiles/ai-agent/AGENTS.md
 ~/.claude/CLAUDE.md  -> ~/.dotfiles/ai-agent/AGENTS.md
+~/.zcode/AGENTS.md   -> ~/.dotfiles/ai-agent/AGENTS.md
 ```
 
 Cursor global User Rules remain a product setting and have no managed file.
@@ -166,6 +167,7 @@ directory must contain `SKILL.md`. Each skill is linked individually:
 ~/.agents/skills/<skill-id>  -> ~/.dotfiles/ai-agent/skills/<skill-id>
 ~/.claude/skills/<skill-id>  -> ~/.dotfiles/ai-agent/skills/<skill-id>
 ~/.cursor/skills/<skill-id>  -> ~/.dotfiles/ai-agent/skills/<skill-id>
+~/.zcode/skills/<skill-id>  -> ~/.dotfiles/ai-agent/skills/<skill-id>
 ```
 
 Editing an existing rule or skill takes effect immediately. Adding, removing,

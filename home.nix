@@ -31,6 +31,7 @@ let
     ".agents/skills"
     ".claude/skills"
     ".cursor/skills"
+    ".zcode/skills"
   ];
   mkOutOfStoreFile = sourcePath: {
     source = config.lib.file.mkOutOfStoreSymlink "${repositoryRoot}/${sourcePath}";
@@ -40,6 +41,7 @@ let
     ".codex/AGENTS.md" = mkOutOfStoreFile "ai-agent/AGENTS.md";
     ".claude/CLAUDE.md" = mkOutOfStoreFile "ai-agent/AGENTS.md";
     ".pi/agent/AGENTS.md" = mkOutOfStoreFile "ai-agent/AGENTS.md";
+    ".zcode/AGENTS.md" = mkOutOfStoreFile "ai-agent/AGENTS.md";
   };
   agentSkillFiles = lib.listToAttrs (lib.concatMap
     (skillId: map

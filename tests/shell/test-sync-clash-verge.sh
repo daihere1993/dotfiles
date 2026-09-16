@@ -13,6 +13,9 @@ fixture_repository="$temporary/repository"
 profiles_directory="$temporary/clash-verge/profiles"
 mkdir -p "$fixture_home/.config/clash-verge" "$fixture_repository/home/config" "$profiles_directory"
 cp -R "$repository/home/config/clash-verge" "$fixture_repository/home/config/"
+# Nix exposes the repository fixture read-only; the test removes generated
+# files later to verify cleanup, so make only this temporary copy writable.
+chmod -R u+w "$fixture_repository/home/config/clash-verge"
 
 cat >"$fixture_home/.config/clash-verge/local.inc" <<'EOF'
 CLASH_VERGE_MERGE_UID=TestMergeUid
@@ -35,18 +38,20 @@ grep -F 'ssh.github.com' "$merge_target" >/dev/null
 [[ -f "$rules_target" ]]
 grep -F 'DOMAIN,ssh.github.com,Test Proxy' "$rules_target" >/dev/null
 grep -F 'DOMAIN-SUFFIX,github.com,Test Proxy' "$rules_target" >/dev/null
-! grep -F '__PROXY_GROUP__' "$rules_target" >/dev/null
+if grep -F '__PROXY_GROUP__' "$rules_target" >/dev/null; then
+  exit 1
+fi
 
 conflict_home="$temporary/conflict-home"
 conflict_profiles_directory="$temporary/clash-verge-conflict/profiles"
 mkdir -p "$conflict_home/.config/clash-verge" "$conflict_profiles_directory"
 conflict_target="$conflict_profiles_directory/conflict-merge.yaml"
 printf 'manual content\n' >"$conflict_target"
-DISCOVERED_HOME=$conflict_home
-CLASH_VERGE_PROFILES_DIR=$conflict_profiles_directory
-CLASH_VERGE_MERGE_UID=conflict-merge
-CLASH_VERGE_RULES_UID=TestRulesUid
-CLASH_VERGE_PROXY_GROUP='Test Proxy'
+export DISCOVERED_HOME=$conflict_home
+export CLASH_VERGE_PROFILES_DIR=$conflict_profiles_directory
+export CLASH_VERGE_MERGE_UID=conflict-merge
+export CLASH_VERGE_RULES_UID=TestRulesUid
+export CLASH_VERGE_PROXY_GROUP='Test Proxy'
 if (sync_clash_verge "$fixture_repository" "$conflict_home") 2>/dev/null; then
   echo "non-symlink merge profile was replaced" >&2
   exit 1

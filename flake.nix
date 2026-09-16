@@ -104,6 +104,7 @@
         ".agents/skills"
         ".claude/skills"
         ".cursor/skills"
+        ".zcode/skills"
       ];
       expectedAgentLinks = [
         {
@@ -116,6 +117,10 @@
         }
         {
           target = ".pi/agent/AGENTS.md";
+          source = "${testMachine.homeDirectory}/.dotfiles/ai-agent/AGENTS.md";
+        }
+        {
+          target = ".zcode/AGENTS.md";
           source = "${testMachine.homeDirectory}/.dotfiles/ai-agent/AGENTS.md";
         }
       ] ++ builtins.concatMap
