@@ -221,11 +221,26 @@ CLASH_VERGE_PROXY_GROUP='🔰 代理'
 ```
 
 Create the merge and rules enhancement profiles once in Clash Verge, note their
-UIDs from `profiles.yaml`, and point the active subscription profile at those
-enhancements. Subscription URLs, selected nodes, and the generated runtime
-config remain outside this repository. After changing the tracked templates,
-run rebuild or `scripts/sync-clash-verge.sh`, then reload the active Clash
-Verge profile.
+UIDs from `profiles.yaml`, and put them in `local.inc`. The sync script then
+binds those shared enhancements to every local remote Profile in
+`profiles.yaml`. This keeps the rules active when switching between airport
+subscriptions and when a subscription refreshes; subscription URLs, selected
+nodes, proxy groups, and the generated runtime config remain outside this
+repository. If a new remote Profile is added later, run rebuild or
+`scripts/sync-clash-verge.sh` again so it is bound as well.
+
+The tracked Clash rules currently support:
+
+| Traffic | Route | Purpose |
+| --- | --- | --- |
+| `appstoreconnect.apple.com`, `api.appstoreconnect.apple.com`, `developer.apple.com` | `DIRECT` | Apple notarization/API access |
+| `apple-cloudkit.com`, `aaplimg.com` | `DIRECT` | Notarization ticket and Apple CDN access |
+| Apple notarization S3 acceleration and `us-west-2` endpoints | `DIRECT` | `notarytool` archive upload |
+| `timestamp.apple.com` | Configured Apple proxy group | Code-signing TSA; domestic direct TLS was unreliable during verification |
+| GitHub and `ssh.github.com` | Configured proxy group | TUN/fake-IP GitHub access |
+
+After changing the tracked templates, run rebuild or
+`scripts/sync-clash-verge.sh`, then reload the active Clash Verge profile.
 
 ## Legacy cleanup
 

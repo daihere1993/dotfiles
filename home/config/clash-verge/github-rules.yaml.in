@@ -2,6 +2,20 @@
 # __PROXY_GROUP__ is substituted by scripts/sync-clash-verge.sh.
 
 prepend:
+  # Apple notarization/API and ticket retrieval should use the domestic direct path.
+  - DOMAIN,appstoreconnect.apple.com,DIRECT
+  - DOMAIN,api.appstoreconnect.apple.com,DIRECT
+  - DOMAIN,developer.apple.com,DIRECT
+  - DOMAIN-SUFFIX,apple-cloudkit.com,DIRECT
+  - DOMAIN-SUFFIX,aaplimg.com,DIRECT
+  # notarytool uploads the archive to one of these S3 endpoints.
+  - DOMAIN,notary-submissions-prod.s3-accelerate.amazonaws.com,DIRECT
+  - DOMAIN,notary-submissions-prod.s3.us-west-2.amazonaws.com,DIRECT
+  - DOMAIN-SUFFIX,s3-accelerate.amazonaws.com,DIRECT
+  - DOMAIN-SUFFIX,s3.us-west-2.amazonaws.com,DIRECT
+  # The TSA endpoint is kept on the configurable Apple proxy group; direct TLS
+  # was not reliable on the current domestic path during release verification.
+  - DOMAIN,timestamp.apple.com,__PROXY_GROUP__
   - DOMAIN,ssh.github.com,__PROXY_GROUP__
   - DOMAIN-SUFFIX,github.com,__PROXY_GROUP__
   - DOMAIN-SUFFIX,githubusercontent.com,__PROXY_GROUP__

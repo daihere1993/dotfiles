@@ -50,7 +50,7 @@ sync_clash_verge() {
   local local_inc="$home_directory/.config/clash-verge/local.inc"
   local merge_source="$repository/home/config/clash-verge/github-merge.yaml"
   local rules_template="$repository/home/config/clash-verge/github-rules.yaml.in"
-  local merge_target rules_target
+  local profiles_config merge_target rules_target
 
   [[ -d "$profiles_directory" ]] || {
     echo "Clash Verge profiles directory not found; skipping clash-verge sync."
@@ -79,7 +79,15 @@ sync_clash_verge() {
   ln -sfn "$merge_source" "$merge_target"
   sed "s/__PROXY_GROUP__/${CLASH_VERGE_PROXY_GROUP}/g" "$rules_template" >"$rules_target"
 
-  echo "Synced Clash Verge GitHub fixes:"
+  profiles_config="$(dirname "$profiles_directory")/profiles.yaml"
+  if [[ -f "$profiles_config" ]]; then
+    /usr/bin/ruby "$repository/scripts/bind-clash-verge-profiles.rb" \
+      "$profiles_config" "$CLASH_VERGE_MERGE_UID" "$CLASH_VERGE_RULES_UID"
+  else
+    echo "Clash Verge profiles.yaml not found; skipping remote profile binding."
+  fi
+
+  echo "Synced Clash Verge shared enhancements:"
   echo "  merge -> $merge_target"
   echo "  rules -> $rules_target"
   echo "Reload the active Clash Verge profile if it is already running."
