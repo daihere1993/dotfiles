@@ -50,6 +50,8 @@
       cc = "claude --dangerously-skip-permissions";
       co = "codex --dangerously-bypass-approvals-and-sandbox";
       cog = "codex --dangerously-bypass-approvals-and-sandbox --profile glm";
+      cow = "codex --dangerously-bypass-approvals-and-sandbox --worktree";
+      cogw = "codex --dangerously-bypass-approvals-and-sandbox --worktree --profile glm";
     };
 
     # Keep a managed login file even though no login-only initialization is needed.
