@@ -1,185 +1,135 @@
 ---
 name: multi-agent-coder
-description: 'MULTI-AGENT ONLY: task discipline for coding agents in host-managed git worktrees (Zed worktree isolation or equivalent) while several agents work on the same repo in parallel. Activate only if EITHER (a) the agent instructions of this repo (AGENTS.md / CLAUDE.md) declare the multi-agent worktree workflow — e.g. a line like "Multi-agent workflow: enabled" — OR (b) the user explicitly frames the work as multi-agent or parallel agents (e.g. "multi-agent task", "parallel agents", "多 agent 并行"). Otherwise never trigger. Never creates or manages worktrees — isolation belongs to the host editor. Sets up the agent/<type>/<slug> branch, bootstraps and verifies the environment, runs only related tests (time-boxed), marks readiness with a git note on the branch tip, and hands off merging to the multi-agent-orchestrator skill (never merges, never pushes).'
+description: Develop and hand off one task in a host-managed worktree when the repository declares a multi-agent workflow or the user explicitly requests parallel-agent work. Prepare the environment, run related verification and record readiness for an exact commit; leave integration to multi-agent-orchestrator. Do not activate for ordinary single-agent work or merely to review this skill.
 license: MIT
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob
 ---
 
-# Multi-Agent Coder: Task Discipline in a Host-Managed Worktree
+# Multi-Agent Coder
 
-## Overview
+One task, one host-managed worktree, one task branch. The host editor owns task
+worktree creation/restoration/archival; the repository owns environment and runtime
+commands; this skill owns development and handoff. The orchestrator owns integration.
 
-One task, one worktree, one branch. Isolation is the host editor's job (Zed's
-worktree picker or equivalent): the thread runs inside a linked worktree, and this
-skill owns only the task discipline on top of it. It is the development half of a
-two-skill workflow:
+Use only when the repo declares `Multi-agent workflow: enabled` or the user
+explicitly requests multi-agent work. Otherwise follow the user's chosen checkout
+and branch; this skill does not require single-agent work to happen on main.
+Explicit user instructions and repository rules override these defaults.
 
-- **multi-agent-coder** (this skill): set up the branch, bootstrap and verify the
-  environment, develop, run related tests, mark the branch ready.
-- **multi-agent-orchestrator**: discover ready `agent/*` branches, merge them into
-  the base branch, run full verification, and clean up.
+## Shared contract
 
-Scope gate — activate only when at least one holds:
+Keep these rules consistent with multi-agent-orchestrator:
 
-1. **Repo declaration**: the agent instructions of this repo (AGENTS.md / CLAUDE.md
-   or equivalent, typically already in context) explicitly declare the multi-agent
-   worktree workflow. The convention is a line like
-   `Multi-agent workflow: enabled` — repos adopt the workflow by adding it.
-2. **Explicit request**: the user explicitly frames the session as multi-agent or
-   parallel agents.
+- Default task branch: `agent/<type>/<slug>`; conventional-commit type and short
+  English kebab-case slug. Honor an explicit user/repo branch choice. Default base:
+  `main`, overridden by `Multi-agent base-branch: <name>` or user instruction.
+- Identify the repository through its canonical Git common directory. Task code
+  belongs to its worktree. Shared Git refs/notes and documented repository-managed
+  caches, immutable baselines and checkout-specific runtime data are permitted.
+  Never modify another task's code, credentials, runtime data or processes.
+- Local-only by default: no push, fetch, pull, gc or global installs.
+- Ready describes a verified commit, not an application health response. Store the
+  JSON receipt below in `refs/notes/agent-task` on that exact commit. Missing,
+  malformed or legacy `status: ready`-only notes require verification again.
+- Ignore rules handle generated output and secrets. Every non-ignored untracked
+  file must be committed, deliberately ignored, or explicitly accounted for by
+  repository policy; it cannot be dismissed merely because it is untracked.
+- Temporary integration-test worktrees are allowed only through an explicitly
+  documented repo test harness that owns and cleans its disposable fixtures.
+  This does not permit creating/removing/repairing host task worktrees.
 
-If neither holds, do not use this skill: single-agent tasks run directly in the
-main checkout without it.
+## Prepare
 
-The worktree directory is a physical sandbox: all edits, installs, builds, and test
-runs happen inside it. The main worktree stays untouched so other agents and the
-user can keep working there in parallel.
+Read the repo instructions and development runbook. Inspect worktree list, branch,
+status and local base ref before changing anything. The first worktree entry is the
+main checkout. Normally request a host worktree when running there; an explicit
+user authorization to work in main or another location takes precedence.
 
-## Shared Conventions (keep in sync with the multi-agent-orchestrator skill)
+Resume an existing task branch only after checking that its commits match the
+request. From detached HEAD, create the task branch at the current commit. Do not
+rename an existing user/host branch without authorization. If the chosen branch
+name exists, select the next free numeric suffix; never reuse another task branch.
+If the worktree disappears, stop task work and request host restoration.
 
-- Branch: `agent/<type>/<slug>` — both parts are derived by the agent from the
-  task itself: `<type>` is the conventional-commit type (`feat`, `fix`,
-  `refactor`, `chore`, ...), `<slug>` is a short English kebab-case name (at most
-  ~3 words) summarizing the task — translate it if the task is described in
-  another language. A user-provided slug overrides the generated one.
-- Base branch: the branch the task integrates into. A repo line like
-  `Multi-agent base-branch: dev` overrides the default `main`. Coder only reads it;
-  only the orchestrator merges, and user actions move it.
-- Readiness: a git note on the branch tip — written as
-  `git notes --ref=agent-task add -f -m "status: ready" HEAD` — is the ready
-  signal. A branch without this note is `in-progress`/unknown. Notes live in the
-  shared `.git`, so readiness survives worktree deletion: the host may remove a
-  worktree at any time (e.g. Zed removes it when a thread is archived).
-- The loop is local-only: never push, never fetch/pull, never touch the remote.
-- Integration always uses `--no-ff` merges; branches are deleted with `-d` only.
-- All identity checks anchor to the shared `.git` of the main repo.
+Use the repo's bootstrap command. A configured host hook can prepare it, but verify
+its actual result. Do not duplicate setup or fall back to generic package installs
+when the repo has a documented procedure. Only use stack-standard installs when
+no such procedure exists. Copy only the development config files explicitly named
+by the repo; never bulk-copy `.env*` or release/server credentials.
 
-## Workflow
+Run a cheap meaningful build/check before development. Five minutes is a progress
+checkpoint, not permission to skip validation or abandon a healthy long install.
+Investigate failures and narrow checks when possible; report a concrete blocker
+when the environment cannot be made usable. Do not publish/reset shared test data
+or silently choose empty onboarding data to bypass a missing baseline.
 
-### 1. Preflight
+## Develop and verify
 
-```bash
-git worktree list --porcelain
-git branch --show-current
-git rev-parse --verify refs/heads/<base>
+Keep changes and commits scoped to this task; use conventional commits without
+agent co-author attribution. Never format the whole repo as incidental cleanup.
+Run related checks first, including uncommitted and non-ignored new source files.
+Broaden when shared contracts, CI or other global changes justify it. Record what
+actually ran and what remains unverified; time budgets do not turn failures green.
+
+Use the repository's start/status/logs/stop commands for functional checks. You may
+leave an explicitly identified session running while waiting for requested human
+acceptance. Report its checkout, session and phase through the repo status command.
+That phase is **waiting for acceptance**, not ready for integration. Do not start a
+new session blindly when one already exists, or kill processes using cached PIDs.
+
+Before normal finalization, stop this task's session and confirm shutdown. If the
+user asks to keep it open, hand off that state and defer the ready receipt until
+shutdown (unless the user explicitly overrides the readiness policy). Never stop
+another task's services. Manual acceptance is required only when the user or repo
+requires it, not for every change.
+
+## Finalize an exact commit
+
+1. Finish the required human acceptance and stop owned services.
+2. Commit all meaningful files. Check `git status --porcelain=v1 --untracked-files=all`;
+   a clean tree includes non-ignored untracked files under the shared contract.
+3. Do **not** automatically rebase because the base moved. Report the tested base
+   and let integration validate the combination. If rebase/reset/cherry-pick is
+   explicitly requested, stop the runtime first. On uncertain conflicts abort the
+   operation; after a successful history/content change, rerun affected checks and
+   any acceptance invalidated by the change before marking ready.
+4. Run required verification against the final commit. Record its SHA and the
+   included base SHA (`git merge-base <testedHead> <base>`) as baseHead and the
+   base ref at verification time as observedBaseHead; confirm HEAD and tree are unchanged when
+   writing the note. If they changed during verification, validate again.
+5. Write the following receipt as JSON with actual values (redact command secrets); use a temporary file
+   and `git notes --ref=agent-task add -f -F <receipt-file> <testedHead>`.
+
+```json
+{
+  "schemaVersion": 1,
+  "status": "ready",
+  "branch": "agent/fix/example",
+  "testedHead": "<full task commit SHA>",
+  "baseBranch": "main",
+  "baseHead": "<full merge-base SHA included in testedHead>",
+  "observedBaseHead": "<full current base-ref SHA at verification>",
+  "checks": [{"command": "<actual command>", "result": "passed"}],
+  "manualAcceptance": {"required": false, "result": "not-required"},
+  "runtime": {"state": "stopped"}
+}
 ```
 
-- The **first entry** of `git worktree list --porcelain` is the main worktree — its
-  path is the main repo root. If the current directory is the main worktree (or not
-  a linked worktree at all), **stop and tell the user** to run this task in a new
-  host worktree (Zed: the worktree picker in the title bar). Never create a
-  worktree yourself.
-- **Resume check**: if the current branch already matches `agent/*`, do not create
-  or rename anything — continue the task in place, after confirming via the
-  branch's existing commits that it matches what the user is asking now.
-- **Branch setup**: fresh host worktrees usually start in detached HEAD — create
-  the branch at the current commit with `git switch -c agent/<type>/<slug>`. If the
-  session sits on a differently named branch that has no task commits yet, rename
-  it with `git branch -m agent/<type>/<slug>`. If a branch with the target name
-  already exists anywhere in the repo, use `<slug>-2` instead and say so.
-- Not a git repo, or the base branch (default `main`, see Shared Conventions) does
-  not exist locally → stop and explain.
+`baseHead` is included in the tested branch; observedBaseHead may be newer and
+is not claimed to have been integrated or tested with this task.
 
-### 2. Bootstrap the environment
+For required human acceptance use `required: true, result: "passed"` only after
+actual acceptance. Runtime may be `not-started` if no session was launched. Do not
+mark ready with pending/failed checks, pending acceptance or a running session by
+default. Git notes attach to commits, so the branch field must also match: a branch
+alias pointing at a ready commit does not automatically inherit task readiness.
 
-A fresh worktree has no dependencies and no ignored files. The goal is a worktree
-that can compile and run tests **before development starts** — a broken baseline
-makes every later test failure unattributable.
+Before replacing an existing note, verify it belongs to this task branch; do not
+overwrite another branch's receipt on an aliased commit. Concurrent notes updates
+can contend on the shared ref. For a Git lock/ref-update conflict only, reread the
+note and retry a bounded number of times while HEAD/tree remain unchanged; do not
+remove lock files or retry unrelated failures blindly.
 
-- Source of truth: the repo's own docs — README, CONTRIBUTING, `docs/`, plus the
-  repo's `AGENTS.md`/`CLAUDE.md`. Read them (content is identical in the fresh
-  worktree) and follow their setup instructions.
-- Repos can automate this step with the host's hook (Zed: the `create_worktree`
-  task hook, which runs right after a worktree is created); if the repo configures
-  it, trust it and only verify the result.
-- Only when neither the hook nor the docs specify anything usable, fall back to
-  the standard install for the detected stack: `package.json` → `pnpm/npm install`;
-  `pyproject.toml`/`requirements.txt` → `uv`/`pip sync`; `Cargo.toml` →
-  `cargo fetch`; `go.mod` → `go mod download`; `Makefile`/`justfile` targets when
-  that is the convention.
-- Copy gitignored `.env*` files from the main worktree root if they exist
-  (read-only access to the main worktree for this copy is allowed).
-- **Verify the environment works before moving on** (time-boxed ~5 minutes): run
-  the cheapest meaningful check — a compile/build, or one quick known test. An
-  install that "succeeded" is not proof; something must actually run.
-- If bootstrap or verification fails and cannot be fixed quickly: **stop and
-  report to the user** instead of developing in a broken environment.
-- No global installs, ever.
-
-### 3. Develop
-
-- Everything happens inside this worktree. **Never touch the main worktree or other
-  worktrees** — no checkout, no edits, no config changes there.
-- Commit early and often with small conventional commits (follow the commit-code
-  skill's conventions). Uncommitted work is the only thing that can be lost if the
-  host removes the worktree — keep that window small.
-- Forbidden while working under this skill: `git push`, `git gc`, `git worktree
-  add`, `git worktree remove`, `git worktree prune`, global installs, whole-repo
-  formatting, leaving dev servers running.
-- The target repo's own `AGENTS.md`/`CLAUDE.md` overrides anything in this skill,
-  including test commands and style rules.
-- If the base branch moves mid-task, ignore it — finish the task first; rebasing is
-  a finalize-time concern.
-
-### 4. Test related-first
-
-Only run tests related to the change. Identify the fastest related-test mechanism the
-project offers:
-
-| Ecosystem        | Related-test approach                        |
-| ---------------- | -------------------------------------------- |
-| JS/TS (vitest)   | `vitest related -- <changed files>`          |
-| JS/TS (jest)     | `jest --findRelatedTests <files>`            |
-| Go               | `go test ./<affected packages>`              |
-| Python           | run test files mirroring changed module paths |
-| Rust             | `cargo test -p <affected packages>`          |
-
-- Changed set = `git diff --name-only <base>...HEAD` plus uncommitted changes.
-- Time-box ~5 minutes per run; if exceeded, narrow the scope (one package, one file).
-- Run the full suite only when the change is inherently global (CI config, shared
-  modules, lockfiles) — and say so in the final report.
-- If no related tests can be identified, fall back to a compile/build check and say
-  so. Fix failures and iterate before finalizing.
-
-### 5. Finalize
-
-```bash
-git status --porcelain      # no modified/staged entries allowed
-git rev-parse refs/heads/<base>
-git merge-base HEAD <base>  # if these differ, the base moved → rebase
-git rebase <base>           # only if it moved; abort on conflict
-```
-
-- All meaningful changes committed; untracked files limited to `.env*` copies and
-  gitignored build/test artifacts.
-- If the base branch moved since branching, rebase onto it. **On any conflict,
-  `git rebase --abort` immediately** and leave integration to the orchestrator —
-  note it in the report.
-- Then mark readiness. **Write the note only after the rebase has settled**, so it
-  sits on the final tip:
-
-```bash
-git notes --ref=agent-task add -f -m "status: ready" HEAD
-```
-
-- Report to the user: branch name, `git diff --stat <base>...HEAD`, test results,
-  rebase outcome. Close with the handoff note: merging is the
-  multi-agent-orchestrator skill's job — do not merge into the base branch from
-  here.
-
-## Hard Rules
-
-- Never create, remove, reattach, or prune worktrees — the host owns isolation. If
-  a task's worktree is gone (e.g. its Zed thread was archived), ask the user to
-  restore that thread (the host recreates the worktree) instead of working around
-  it.
-- Never push, fetch, or pull.
-- Never touch anything outside this task's worktree — no checkout, no edits, no
-  config changes there. The read-only `.env*` copy from the main worktree is the
-  only exception.
-- Never run `git gc` or global installs.
-- No readiness note until related tests are green and the tree is clean.
-- Never merge into the base branch — merging is the orchestrator's job.
-- Single-agent sessions never use this skill — work directly in the main checkout.
-- Within an active multi-agent session, route every task through this skill however
-  small: a host worktree is cheaper than a conflict.
+Report branch, tested SHA/base, diff summary, checks, acceptance, stopped runtime
+and any remaining risks. Hand off merging to multi-agent-orchestrator. Do not merge
+into the base, delete task branches, or archive host worktrees from this skill.
