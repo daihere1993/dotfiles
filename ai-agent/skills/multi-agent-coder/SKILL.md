@@ -1,6 +1,6 @@
 ---
 name: multi-agent-coder
-description: Develop and hand off one task in a host-managed worktree when the repository declares a multi-agent workflow or the user explicitly requests parallel-agent work. Prepare the environment, run related verification and record readiness for an exact commit; leave integration to multi-agent-orchestrator. Do not activate for ordinary single-agent work or merely to review this skill.
+description: Develop and hand off one task in a host-managed worktree when the user explicitly invokes multi-agent-coder. Prepare the environment, run related verification and record readiness for an exact commit; leave integration to multi-agent-orchestrator. Do not activate automatically or merely to review this skill.
 license: MIT
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob
 ---
@@ -11,9 +11,10 @@ One task, one host-managed worktree, one task branch. The host editor owns task
 worktree creation/restoration/archival; the repository owns environment and runtime
 commands; this skill owns development and handoff. The orchestrator owns integration.
 
-Use only when the repo declares `Multi-agent workflow: enabled` or the user
-explicitly requests multi-agent work. Otherwise follow the user's chosen checkout
-and branch; this skill does not require single-agent work to happen on main.
+Use only when the user explicitly invokes `multi-agent-coder`. A repository workflow
+declaration, worktree location or general request for parallel work does not invoke
+this skill. Otherwise follow the user's chosen checkout and branch; this skill does
+not require single-agent work to happen on main.
 Explicit user instructions and repository rules override these defaults.
 
 ## Shared contract
@@ -44,6 +45,11 @@ Read the repo instructions and development runbook. Inspect worktree list, branc
 status and local base ref before changing anything. The first worktree entry is the
 main checkout. Normally request a host worktree when running there; an explicit
 user authorization to work in main or another location takes precedence.
+
+Before modifying task files or starting development, create or confirm the task
+branch and verify that HEAD is attached to it. If branch creation or verification
+fails, stop and report the blocker; do not start development. If the worktree
+already contains changes, preserve them and inspect their ownership before acting.
 
 Resume an existing task branch only after checking that its commits match the
 request. From detached HEAD, create the task branch at the current commit. Do not
