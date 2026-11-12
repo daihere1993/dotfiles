@@ -2,11 +2,11 @@
 """Exec an integration shell/command while holding the repository's kernel lock."""
 
 import argparse
-import fcntl
 import os
-import subprocess
 import sys
 from pathlib import Path
+
+from integration_lock import integration_lock
 
 
 def main():
@@ -18,28 +18,19 @@ def main():
     if not command:
         parser.error("a command after -- is required")
     repo = Path(args.repo).resolve(strict=True)
-    common = subprocess.check_output(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        cwd=repo,
-        text=True,
-    ).strip()
-    lock_path = Path(common).resolve(strict=True) / "agent-integration.lock"
-    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_context = integration_lock(repo)
+        descriptor = lock_context.__enter__()
     except BlockingIOError:
-        os.close(descriptor)
         print(
             "Another integration session holds this repository lock.", file=sys.stderr
         )
         return 75
-    # The persistent shell retains the descriptor, including while commands run.
-    os.set_inheritable(descriptor, True)
     os.chdir(repo)
     try:
         os.execvp(command[0], command)
     finally:
-        os.close(descriptor)
+        lock_context.__exit__(None, None, None)
 
 
 if __name__ == "__main__":

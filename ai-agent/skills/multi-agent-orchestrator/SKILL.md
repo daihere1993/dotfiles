@@ -47,15 +47,46 @@ its first commit). Default candidates are verified, clean, stopped, ahead of bas
 and not already contained in it. Missing worktrees are normal, but explicitly note
 that their former uncommitted state cannot now be inspected.
 
+When the target repository has a valid `.agent-integration.json`, run:
+
+```text
+python3 <skill-directory>/scripts/agent_orchestrator.py discover --repo <main-root> --json
+```
+
+The CLI performs the Git/receipt/worktree/runtime audit and returns a JSON payload.
+Render that payload as the candidate table for the user; do not recreate the audit
+through many one-off commands when the CLI is available. If the config is absent or
+invalid, use the manual procedure in this document.
+
 ## Confirm, then serialize
 
 Get confirmation of the target branch, exact task SHAs, order and any required
 service shutdown. Existing explicit authorization can cover the stated batch;
 do not repeatedly ask for the same approval. Never silently substitute a new tip.
+For a configured repository, present one plan and ask for exactly one decision:
+`merge only`, `merge + cleanup`, or cancel. Cleanup approval must name the exact
+worktree/branch list and includes stopping only that approved task's runtime,
+removing only its clean worktree, and `git branch -d`. Cleanup is still attempted
+only after full integration verification passes.
 
 Hold one exclusive integration lock for the canonical common directory across
 revalidation, merges, environment preparation, verification/fixes and any approved
-cleanup. Prefer a documented repo equivalent, otherwise use the bundled helper:
+cleanup. For a configured repository, the bundled CLI acquires that lock itself:
+
+```text
+python3 <skill-directory>/scripts/agent_orchestrator.py integrate \
+  --repo <main-root> \
+  --expected-base-head <full-base-sha> \
+  --merge <branch>=<full-task-sha> \
+  --cleanup <branch>=<full-task-sha>
+```
+
+Omit `--cleanup` for merge-only approval. For re-verification after an approved
+fix-forward commit, use `verify`. For later cleanup of an already verified
+contribution, use `cleanup`. Read the JSON result and, on failure, the referenced
+verification log. Do not use the persistent lock shell for the configured flow.
+
+Prefer a documented repo equivalent, otherwise use the bundled helper:
 
 ```text
 python3 <skill-directory>/scripts/with-integration-lock.py --repo <main-root> -- /bin/sh
@@ -69,6 +100,12 @@ lock ownership from a PID. If the helper/runtime is unavailable, use a documente
 equivalent or report the blocker; do not integrate without serialization.
 Do not carry out a long confirmation wait while blocking unrelated integration:
 obtain the initial decision first, then acquire and revalidate everything.
+
+The CLI additionally requires `--expected-base-head` and fails before mutation if
+the target moved after approval. It rechecks target cleanliness, every immutable
+task SHA and receipt, live task worktrees, task runtime state and the base
+checkout's runtime before the first merge. Repository commands come only from the
+trusted repository config, never from receipt data.
 
 Inside the lock:
 
@@ -131,6 +168,13 @@ Immediately before each deletion, under the integration lock:
 3. Use `git branch -d <approved-branch>` only. If checked out, request host archival
    after confirming all work is saved and services stopped, then revalidate before
    retrying. Do not remove a host worktree yourself without explicit authorization.
+
+When the user has explicitly approved cleanup and repository config sets
+`allowWorktreeRemove: true`, the CLI may remove that exact clean worktree with
+`git worktree remove <path>` (without force) before `git branch -d`. If removal
+fails, keep the branch and report the reason. This explicit-cleanup exception does
+not authorize touching another worktree, persisted debugging data or ignored
+personal data.
 
 Never use `-D`, force removal or gc as a workaround. Keep ignored personal data and
 repo-managed profiles according to the repo's retention policy. A repo-declared
