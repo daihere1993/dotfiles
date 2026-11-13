@@ -220,6 +220,45 @@ class OrchestratorCliTests(unittest.TestCase):
         self.assertEqual(payload["status"], "cleanup-failed")
         self.assertEqual(payload["cleanup"][0]["reason"], "tip-moved")
 
+    def test_minimal_config_uses_defaults(self):
+        temporary, root, task_root, base, task = make_fixture()
+        config = {
+            "schemaVersion": 2,
+            "allowWorktreeRemove": True,
+            "commands": {
+                "setup": command_output("print('setup')"),
+                "verify": command_output("pass"),
+                "runtimeStatus": command_output(
+                    "import json; print(json.dumps({'state':'stopped','phase':'stopped','processes':{}}))"
+                ),
+                "runtimeStop": command_output("print('stop')"),
+            },
+        }
+        (root / ".agent-integration.json").write_text(json.dumps(config), encoding="utf-8")
+        payload = cli("discover", "--repo", str(root), "--json")
+        self.assertEqual(payload["_returncode"], 0, payload)
+        self.assertEqual(payload["baseBranch"], "main")
+        candidates = [entry["branch"] for entry in payload.get("candidates", [])]
+        self.assertIn("agent/test", candidates)
+
+    def test_config_schema_below_minimum_is_rejected(self):
+        temporary, root, task_root, base, task = make_fixture()
+        config = json.loads((root / ".agent-integration.json").read_text())
+        config["schemaVersion"] = 1
+        (root / ".agent-integration.json").write_text(json.dumps(config), encoding="utf-8")
+        payload = cli("discover", "--repo", str(root), "--json")
+        self.assertEqual(payload["_returncode"], 1)
+        self.assertEqual(payload["status"], "config-invalid")
+        self.assertIn("at least 2", payload["message"])
+
+    def test_config_schema_above_minimum_is_accepted(self):
+        temporary, root, task_root, base, task = make_fixture()
+        config = json.loads((root / ".agent-integration.json").read_text())
+        config["schemaVersion"] = 3
+        (root / ".agent-integration.json").write_text(json.dumps(config), encoding="utf-8")
+        payload = cli("discover", "--repo", str(root), "--json")
+        self.assertEqual(payload["_returncode"], 0, payload)
+
 
 if __name__ == "__main__":
     unittest.main()

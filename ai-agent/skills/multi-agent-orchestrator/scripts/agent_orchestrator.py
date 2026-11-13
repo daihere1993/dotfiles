@@ -17,7 +17,7 @@ from typing import Any
 from integration_lock import integration_lock
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-WORKFLOW_SCHEMA_VERSION = 2
+MIN_CONFIG_SCHEMA_VERSION = 2
 
 
 class OrchestratorError(Exception):
@@ -116,15 +116,18 @@ def load_config(root: Path) -> Config:
     prefix = raw.get("taskBranchPrefix", "agent/")
     if not isinstance(prefix, str) or not prefix:
         raise OrchestratorError("config-invalid", "taskBranchPrefix must be a nonempty string")
-    base = raw.get("baseBranch")
+    base = raw.get("baseBranch", "main")
     if not isinstance(base, str) or not base:
         raise OrchestratorError("config-invalid", "baseBranch must be a nonempty string")
     allow = raw.get("allowWorktreeRemove", False)
     if not isinstance(allow, bool):
         raise OrchestratorError("config-invalid", "allowWorktreeRemove must be boolean")
     schema_version = raw.get("schemaVersion")
-    if type(schema_version) is not int or schema_version != WORKFLOW_SCHEMA_VERSION:
-        raise OrchestratorError("config-invalid", "Config schemaVersion must be 2")
+    if type(schema_version) is not int or schema_version < MIN_CONFIG_SCHEMA_VERSION:
+        raise OrchestratorError(
+            "config-invalid",
+            f"Config schemaVersion must be at least {MIN_CONFIG_SCHEMA_VERSION}",
+        )
     verify = command("verify")
     return Config(
         path=path,
