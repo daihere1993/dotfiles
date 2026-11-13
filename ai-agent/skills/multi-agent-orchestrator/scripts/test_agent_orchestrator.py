@@ -38,7 +38,7 @@ def command_output(code: str) -> list[str]:
 
 def write_config(root: Path, *, verify_code: str = "pass", allow_remove: bool = True) -> None:
     config = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "baseBranch": "main",
         "taskBranchPrefix": "agent/",
         "allowWorktreeRemove": allow_remove,
@@ -55,25 +55,6 @@ def write_config(root: Path, *, verify_code: str = "pass", allow_remove: bool = 
     (root / ".agent-integration.json").write_text(json.dumps(config), encoding="utf-8")
 
 
-def write_receipt(root: Path, branch: str, tested: str, base: str) -> None:
-    receipt = {
-        "schemaVersion": 1,
-        "status": "ready",
-        "branch": branch,
-        "testedHead": tested,
-        "baseBranch": "main",
-        "baseHead": base,
-        "observedBaseHead": base,
-        "checks": [{"command": "fixture check", "result": "passed"}],
-        "manualAcceptance": {"required": False, "result": "not-required"},
-        "runtime": {"state": "stopped"},
-    }
-    receipt_file = root / f".receipt-{tested}.json"
-    receipt_file.write_text(json.dumps(receipt), encoding="utf-8")
-    git(root, "notes", "--ref=agent-task", "add", "-f", "-F", str(receipt_file), tested)
-    receipt_file.unlink()
-
-
 def make_fixture(task_name: str = "agent/test") -> tuple[Path, Path, str, str, str]:
     temporary = Path(tempfile.mkdtemp(prefix="orchestrator-cli-"))
     root = temporary / "repo"
@@ -87,7 +68,6 @@ def make_fixture(task_name: str = "agent/test") -> tuple[Path, Path, str, str, s
     task_root = temporary / "task"
     git(root, "worktree", "add", str(task_root), task_name)
     task = commit(task_root, "task change")
-    write_receipt(task_root, task_name, task, base)
     return temporary, root, task_root, base, task
 
 
@@ -111,7 +91,7 @@ def cli(*args: str) -> dict:
 class OrchestratorCliTests(unittest.TestCase):
     maxDiff = None
 
-    def test_discovery_validates_a_ready_task(self):
+    def test_discovery_lists_a_committed_clean_task_as_a_candidate(self):
         temporary, root, task_root, base, task = make_fixture()
         payload = cli("discover", "--repo", str(root), "--json")
         self.assertEqual(payload["_returncode"], 0)
@@ -119,17 +99,17 @@ class OrchestratorCliTests(unittest.TestCase):
         self.assertEqual(len(payload["candidates"]), 1)
         candidate = payload["candidates"][0]
         self.assertEqual(candidate["branch"], "agent/test")
-        self.assertEqual(candidate["testedHead"], task)
-        self.assertTrue(candidate["receipt"]["valid"])
+        self.assertEqual(candidate["sha"], task)
+        self.assertTrue(candidate["hasContentDiff"])
+        self.assertEqual(candidate["aheadCount"], 1)
         self.assertEqual(candidate["worktree"]["state"], "clean")
-        self.assertEqual(candidate["verdict"], "ready")
+        self.assertEqual(candidate["status"], "candidate")
 
-    def test_discovery_rejects_missing_and_malformed_receipts(self):
+    def test_discovery_excludes_a_dirty_task(self):
         temporary, root, task_root, base, task = make_fixture()
-        git(task_root, "notes", "--ref=agent-task", "remove", task)
+        (task_root / "uncommitted.txt").write_text("work in progress\n", encoding="utf-8")
         payload = cli("discover", "--repo", str(root), "--json")
-        self.assertEqual(payload["candidates"][0]["verdict"], "unverified")
-        self.assertEqual(payload["candidates"][0]["receipt"]["errors"], ["missing-note"])
+        self.assertEqual(payload["candidates"][0]["status"], "dirty")
 
     def test_integrate_requires_an_unchanged_expected_base(self):
         temporary, root, task_root, base, task = make_fixture()
@@ -155,10 +135,53 @@ class OrchestratorCliTests(unittest.TestCase):
         )
         self.assertEqual(payload["_returncode"], 0, payload)
         self.assertEqual(payload["status"], "verified-and-cleaned")
-        self.assertEqual(payload["merges"][0]["result"], "merged")
+        self.assertEqual(payload["merges"][0]["mode"], "squash")
+        self.assertEqual(payload["merges"][0]["result"], "squashed")
+        self.assertNotEqual(payload["merges"][0]["integratedSha"], task)
         self.assertEqual(payload["cleanup"][0]["result"], "deleted")
+        self.assertEqual(payload["cleanup"][0]["mode"], "squash")
         self.assertEqual(git(root, "rev-parse", "main"), payload["finalBaseHead"])
+        self.assertFalse(git_true(root, "merge-base", "--is-ancestor", task, "main"))
+        self.assertTrue(git_true(root, "merge-base", "--is-ancestor", payload["merges"][0]["integratedSha"], "main"))
+        result = subprocess.run(["git", "rev-parse", "--verify", "agent/test"], cwd=root, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_regular_merge_preserves_commits_and_cleans_with_ancestry(self):
+        temporary, root, task_root, base, task = make_fixture()
+        payload = cli(
+            "integrate",
+            "--repo", str(root),
+            "--expected-base-head", base,
+            "--merge-mode", "merge",
+            "--merge", f"agent/test={task}",
+            "--cleanup", f"agent/test={task}",
+        )
+        self.assertEqual(payload["_returncode"], 0, payload)
+        self.assertEqual(payload["status"], "verified-and-cleaned")
+        self.assertEqual(payload["merges"][0]["mode"], "merge")
+        self.assertEqual(payload["merges"][0]["result"], "merged")
         self.assertTrue(git_true(root, "merge-base", "--is-ancestor", task, "main"))
+        self.assertEqual(git(root, "branch", "--list", "agent/test", "--format=%(refname:short)"), "")
+
+    def test_squash_cleanup_requires_the_integrated_commit_mapping(self):
+        temporary, root, task_root, base, task = make_fixture()
+        integration = cli(
+            "integrate",
+            "--repo", str(root),
+            "--expected-base-head", base,
+            "--merge", f"agent/test={task}",
+        )
+        self.assertEqual(integration["_returncode"], 0, integration)
+        integrated = integration["merges"][0]["integratedSha"]
+        payload = cli(
+            "cleanup",
+            "--repo", str(root),
+            "--expected-base-head", integration["finalBaseHead"],
+            "--cleanup", f"agent/test={task}={integrated}",
+        )
+        self.assertEqual(payload["_returncode"], 0, payload)
+        self.assertEqual(payload["cleanup"][0]["result"], "deleted")
+        self.assertEqual(payload["cleanup"][0]["mode"], "squash")
         result = subprocess.run(["git", "rev-parse", "--verify", "agent/test"], cwd=root, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
 
@@ -170,7 +193,6 @@ class OrchestratorCliTests(unittest.TestCase):
         git(task_root, "add", ".agent-integration.json")
         git(task_root, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "failing verify config")
         task = git(task_root, "rev-parse", "HEAD")
-        write_receipt(task_root, "agent/test", task, base)
         payload = cli(
             "integrate",
             "--repo", str(root),
@@ -180,9 +202,10 @@ class OrchestratorCliTests(unittest.TestCase):
         )
         self.assertEqual(payload["_returncode"], 1)
         self.assertEqual(payload["status"], "verification-failed")
-        self.assertEqual(payload["merges"][0]["result"], "merged")
+        self.assertEqual(payload["merges"][0]["result"], "squashed")
         self.assertEqual(payload["cleanup"], [])
-        self.assertTrue(git_true(root, "merge-base", "--is-ancestor", task, "main"))
+        integrated = payload["merges"][0]["integratedSha"]
+        self.assertTrue(git_true(root, "merge-base", "--is-ancestor", integrated, "main"))
         self.assertEqual(git(root, "branch", "--list", "agent/test", "--format=%(refname:short)"), "agent/test")
 
     def test_cleanup_rejects_a_moved_branch_tip(self):

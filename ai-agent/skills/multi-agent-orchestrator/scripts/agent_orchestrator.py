@@ -17,7 +17,7 @@ from typing import Any
 from integration_lock import integration_lock
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-RECEIPT_SCHEMA_VERSION = 1
+WORKFLOW_SCHEMA_VERSION = 2
 
 
 class OrchestratorError(Exception):
@@ -45,6 +45,7 @@ class Config:
 class Task:
     branch: str
     sha: str
+    integrated_sha: str | None = None
 
 
 def git(root: Path, *args: str, check: bool = True) -> str:
@@ -122,8 +123,8 @@ def load_config(root: Path) -> Config:
     if not isinstance(allow, bool):
         raise OrchestratorError("config-invalid", "allowWorktreeRemove must be boolean")
     schema_version = raw.get("schemaVersion")
-    if type(schema_version) is not int or schema_version != RECEIPT_SCHEMA_VERSION:
-        raise OrchestratorError("config-invalid", "Config schemaVersion must be 1")
+    if type(schema_version) is not int or schema_version != WORKFLOW_SCHEMA_VERSION:
+        raise OrchestratorError("config-invalid", "Config schemaVersion must be 2")
     verify = command("verify")
     return Config(
         path=path,
@@ -142,13 +143,28 @@ def parse_task_values(values: list[str], argument: str) -> list[Task]:
     tasks: list[Task] = []
     seen: set[str] = set()
     for value in values:
-        branch, separator, sha = value.partition("=")
-        if not separator or not branch or not FULL_SHA.fullmatch(sha):
-            raise OrchestratorError("invalid-task", f"{argument} entries must use branch=<40-character-full-sha>")
+        parts = value.split("=")
+        if len(parts) == 2:
+            branch, sha = parts
+            integrated_sha = None
+        elif len(parts) == 3 and argument == "--cleanup":
+            branch, sha, integrated_sha = parts
+        else:
+            raise OrchestratorError(
+                "invalid-task",
+                f"{argument} entries must use branch=<40-character-full-sha>"
+                + ("[=<40-character-integrated-sha>]" if argument == "--cleanup" else ""),
+            )
+        if not branch or not FULL_SHA.fullmatch(sha) or (integrated_sha is not None and not FULL_SHA.fullmatch(integrated_sha)):
+            raise OrchestratorError(
+                "invalid-task",
+                f"{argument} entries must use branch=<40-character-full-sha>"
+                + ("[=<40-character-integrated-sha>]" if argument == "--cleanup" else ""),
+            )
         if branch in seen:
             raise OrchestratorError("invalid-task", f"Branch repeated in {argument}: {branch}")
         seen.add(branch)
-        tasks.append(Task(branch=branch, sha=sha))
+        tasks.append(Task(branch=branch, sha=sha, integrated_sha=integrated_sha))
     return tasks
 
 
@@ -159,62 +175,8 @@ def verify_full_commit(root: Path, sha: str, label: str) -> None:
         raise OrchestratorError("unknown-sha", f"{label} does not exist in this repository")
 
 
-def validate_receipt(root: Path, branch: str, sha: str, config: Config) -> dict[str, Any]:
-    notes = git(root, "notes", "--ref=agent-task", "show", sha, check=False)
-    if notes.startswith("error: ") or not notes.strip():
-        return {"valid": False, "errors": ["missing-note"], "note": None}
-    try:
-        receipt = json.loads(notes)
-    except json.JSONDecodeError:
-        return {"valid": False, "errors": ["malformed-json"], "note": None}
-    if not isinstance(receipt, dict):
-        return {"valid": False, "errors": ["malformed-json"], "note": None}
-    errors: list[str] = []
-    if type(receipt.get("schemaVersion")) is not int or receipt.get("schemaVersion") != RECEIPT_SCHEMA_VERSION:
-        errors.append("schemaVersion")
-    if receipt.get("status") != "ready":
-        errors.append("status")
-    if receipt.get("branch") != branch:
-        errors.append("branch")
-    if receipt.get("testedHead") != sha:
-        errors.append("testedHead")
-    if receipt.get("baseBranch") != config.base_branch:
-        errors.append("baseBranch")
-    for field in ("testedHead", "baseHead", "observedBaseHead"):
-        value = receipt.get(field)
-        if not isinstance(value, str) or not FULL_SHA.fullmatch(value):
-            errors.append(f"{field}-shape")
-            continue
-        if not git_ok(root, "cat-file", "-e", f"{value}^{{commit}}"):
-            errors.append(f"{field}-unknown")
-    base_head = receipt.get("baseHead")
-    tested_head = receipt.get("testedHead")
-    if isinstance(base_head, str) and isinstance(tested_head, str) and not errors:
-        if not git_ok(root, "merge-base", "--is-ancestor", base_head, tested_head):
-            errors.append("baseHead-not-ancestor")
-    checks = receipt.get("checks")
-    if not isinstance(checks, list) or not checks:
-        errors.append("checks-empty")
-    else:
-        for check in checks:
-            if not isinstance(check, dict) or check.get("result") != "passed" or not isinstance(check.get("command"), str):
-                errors.append("checks-not-passed")
-    manual = receipt.get("manualAcceptance")
-    if not isinstance(manual, dict):
-        errors.append("manualAcceptance-shape")
-    else:
-        required = manual.get("required")
-        result = manual.get("result")
-        if type(required) is not bool:
-            errors.append("manualAcceptance-required-shape")
-        if required is True and result != "passed":
-            errors.append("manualAcceptance-required")
-        if required is False and result not in {"not-required", "passed"}:
-            errors.append("manualAcceptance-result")
-    runtime = receipt.get("runtime")
-    if not isinstance(runtime, dict) or runtime.get("state") not in {"stopped", "not-started"}:
-        errors.append("runtime")
-    return {"valid": not errors, "errors": sorted(set(errors)), "note": receipt}
+def has_content_diff(root: Path, base_head: str, sha: str) -> bool:
+    return not git_ok(root, "diff", "--quiet", f"{base_head}...{sha}")
 
 
 def runtime_state(root: Path, config: Config) -> dict[str, Any]:
@@ -295,7 +257,6 @@ def discover(root: Path) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     for row in filter(None, branches.splitlines()):
         branch, sha = row.split("|", 1)
-        receipt = validate_receipt(root, branch, sha, config)
         path = worktrees.get(branch)
         worktree = worktree_status(root, path) if path else "missing"
         runtime = (
@@ -306,26 +267,35 @@ def discover(root: Path) -> dict[str, Any]:
         contained = git_ok(root, "merge-base", "--is-ancestor", sha, base_head)
         ahead = git_ok(root, "merge-base", "--is-ancestor", base_head, sha)
         subjects = git(root, "log", "--format=%s", f"{base_head}..{sha}").splitlines()
-        verdict = "contained" if contained else "unverified"
-        if receipt["valid"] and ahead and not contained:
-            if worktree == "dirty":
-                verdict = "dirty"
-            elif runtime["state"] not in config.runtime_stopped_states:
-                verdict = "runtime-running"
-            else:
-                verdict = "ready"
+        ahead_count = int(git(root, "rev-list", "--count", f"{base_head}..{sha}") or 0)
+        behind_count = int(git(root, "rev-list", "--count", f"{sha}..{base_head}") or 0)
+        diffstat = git(root, "diff", "--stat", f"{base_head}...{sha}")
+        changed = has_content_diff(root, base_head, sha)
+        if contained:
+            status = "contained"
+        elif not ahead:
+            status = "diverged"
+        elif not changed:
+            status = "no-diff"
+        elif worktree == "dirty":
+            status = "dirty"
+        else:
+            status = "candidate"
         candidates.append(
             {
                 "branch": branch,
-                "testedHead": sha,
-                "task": subjects[0] if subjects else "",
+                "sha": sha,
+                "task": subjects[-1] if subjects else "",
                 "commits": subjects,
-                "receipt": receipt,
+                "aheadCount": ahead_count,
+                "behindCount": behind_count,
+                "diffstat": diffstat,
+                "hasContentDiff": changed,
                 "worktree": {"state": worktree, "path": str(path) if path else None},
                 "runtime": runtime,
                 "aheadOfBase": ahead,
                 "containedInBase": contained,
-                "verdict": verdict,
+                "status": status,
             }
         )
     return {
@@ -354,7 +324,7 @@ def require_expected_base(root: Path, config: Config, expected: str) -> tuple[st
     return branch, head, runtime
 
 
-def preflight_tasks(root: Path, config: Config, tasks: list[Task], base_head: str) -> list[dict[str, Any]]:
+def preflight_tasks(root: Path, tasks: list[Task], base_head: str) -> list[dict[str, Any]]:
     worktrees = parse_worktrees(root)
     evidence: list[dict[str, Any]] = []
     for task in tasks:
@@ -362,20 +332,18 @@ def preflight_tasks(root: Path, config: Config, tasks: list[Task], base_head: st
         tip = git(root, "rev-parse", task.branch, check=False)
         if tip != task.sha:
             raise OrchestratorError("task-moved", f"Branch {task.branch} is no longer at {task.sha}", tip)
-        receipt = validate_receipt(root, task.branch, task.sha, config)
-        if not receipt["valid"]:
-            raise OrchestratorError("unverified-task", f"Receipt is not ready for {task.branch}", receipt["errors"])
         if git_ok(root, "merge-base", "--is-ancestor", task.sha, base_head):
             evidence.append({"branch": task.branch, "sha": task.sha, "result": "already-contained"})
             continue
         if not git_ok(root, "merge-base", "--is-ancestor", base_head, task.sha):
             raise OrchestratorError("stale-task", f"{task.branch} does not contain current base {base_head}")
+        if not has_content_diff(root, base_head, task.sha):
+            raise OrchestratorError("no-task-diff", f"Task has no content diff from base: {task.branch}")
         path = worktrees.get(task.branch)
         if path:
             status = worktree_status(root, path)
             if status == "dirty":
                 raise OrchestratorError("task-dirty", f"Task worktree is dirty: {path}")
-            ensure_runtime_stopped(path, config, may_stop=False)
         evidence.append({"branch": task.branch, "sha": task.sha, "result": "approved"})
     return evidence
 
@@ -419,12 +387,37 @@ def execute_environment(root: Path, config: Config, *, verify: bool) -> dict[str
     }
 
 
-def merge_task(root: Path, task: Task) -> dict[str, Any]:
+def task_subject(root: Path, task: Task) -> str:
+    merge_base = git(root, "merge-base", "HEAD", task.sha)
+    subjects = git(root, "log", "--reverse", "--format=%s", f"{merge_base}..{task.sha}").splitlines()
+    return subjects[0] if subjects else f"integrate {task.branch}"
+
+
+def abort_task_merge(root: Path, mode: str) -> None:
+    merge_head = root / ".git" / "MERGE_HEAD"
+    common = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    if (common / "MERGE_HEAD").exists() or merge_head.exists():
+        git(root, "merge", "--abort")
+        return
+    if mode == "squash":
+        # merge --squash can conflict without MERGE_HEAD. The base was clean
+        # before the task, so this rolls back only the current task's staged
+        # conflict while preserving commits from earlier tasks in the batch.
+        git(root, "reset", "--hard", "HEAD")
+
+
+def merge_task(root: Path, task: Task, mode: str) -> dict[str, Any]:
     tip = git(root, "rev-parse", task.branch)
     if tip != task.sha:
         raise OrchestratorError("task-moved", f"Branch moved before merge: {task.branch}", {"expected": task.sha, "found": tip})
+    command = ["git", "merge", "--no-edit"]
+    if mode == "merge":
+        command.append("--no-ff")
+    else:
+        command.append("--squash")
+    command.append(task.sha)
     result = subprocess.run(
-        ["git", "merge", "--no-ff", "--no-edit", task.sha],
+        command,
         cwd=root,
         text=True,
         stdout=subprocess.PIPE,
@@ -432,24 +425,64 @@ def merge_task(root: Path, task: Task) -> dict[str, Any]:
         check=False,
     )
     if result.returncode == 0:
-        return {"branch": task.branch, "sha": task.sha, "mergeHead": git(root, "rev-parse", "HEAD"), "result": "merged"}
+        if mode == "merge":
+            integrated_sha = git(root, "rev-parse", "HEAD")
+            return {
+                "branch": task.branch,
+                "sha": task.sha,
+                "integratedSha": integrated_sha,
+                "mode": mode,
+                "result": "merged",
+            }
+        if git_ok(root, "diff", "--quiet", "--cached", "HEAD"):
+            return {"branch": task.branch, "sha": task.sha, "mode": mode, "result": "no-op"}
+        git(root, "commit", "-m", task_subject(root, task), "-m", f"Task-Branch: {task.branch}\nTask-Head: {task.sha}")
+        integrated_sha = git(root, "rev-parse", "HEAD")
+        return {
+            "branch": task.branch,
+            "sha": task.sha,
+            "integratedSha": integrated_sha,
+            "mode": mode,
+            "result": "squashed",
+        }
     merge_head = root / ".git" / "MERGE_HEAD"
     common = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-    if (common / "MERGE_HEAD").exists() or merge_head.exists():
-        git(root, "merge", "--abort")
-        raise OrchestratorError("merge-conflict", f"Conflicts while merging {task.branch}", result.stdout.strip())
-    raise OrchestratorError("merge-failed", f"Git failed while merging {task.branch}", result.stdout.strip())
+    conflict = "CONFLICT" in result.stdout or (common / "MERGE_HEAD").exists() or merge_head.exists()
+    abort_task_merge(root, mode)
+    error_code = "merge-conflict" if conflict else "merge-failed"
+    raise OrchestratorError(
+        error_code,
+        f"Git failed while integrating {task.branch} with {mode} merge",
+        result.stdout.strip(),
+    )
 
 
-def cleanup_task(root: Path, config: Config, task: Task, final_base: str) -> dict[str, Any]:
+def cleanup_task(root: Path, config: Config, task: Task, final_base: str, *, mode: str = "merge") -> dict[str, Any]:
+    integrated_sha = task.integrated_sha
     tip = git(root, "rev-parse", task.branch, check=False)
     if tip != task.sha:
         return {"branch": task.branch, "sha": task.sha, "result": "skipped", "reason": "tip-moved", "tip": tip or None}
-    if not git_ok(root, "merge-base", "--is-ancestor", task.sha, final_base):
-        return {"branch": task.branch, "sha": task.sha, "result": "skipped", "reason": "not-contained"}
-    receipt = validate_receipt(root, task.branch, task.sha, config)
-    if not receipt["valid"]:
-        return {"branch": task.branch, "sha": task.sha, "result": "skipped", "reason": "unverified", "errors": receipt["errors"]}
+    contained = git_ok(root, "merge-base", "--is-ancestor", task.sha, final_base)
+    if not contained:
+        if mode != "squash" or not integrated_sha:
+            return {
+                "branch": task.branch,
+                "sha": task.sha,
+                "integratedSha": integrated_sha,
+                "mode": mode,
+                "result": "skipped",
+                "reason": "not-contained" if not integrated_sha else "integrated-commit-missing",
+            }
+        verify_full_commit(root, integrated_sha, f"{task.branch} integrated sha")
+        if not git_ok(root, "merge-base", "--is-ancestor", integrated_sha, final_base):
+            return {
+                "branch": task.branch,
+                "sha": task.sha,
+                "integratedSha": integrated_sha,
+                "mode": mode,
+                "result": "skipped",
+                "reason": "integrated-commit-not-contained",
+            }
     worktrees = parse_worktrees(root)
     path = worktrees.get(task.branch)
     if path:
@@ -462,10 +495,18 @@ def cleanup_task(root: Path, config: Config, task: Task, final_base: str) -> dic
         result = subprocess.run(["git", "worktree", "remove", str(path)], cwd=root, text=True, capture_output=True, check=False)
         if result.returncode != 0:
             return {"branch": task.branch, "sha": task.sha, "result": "skipped", "reason": "worktree-remove-failed", "stderr": result.stderr.strip()}
-    result = subprocess.run(["git", "branch", "-d", task.branch], cwd=root, text=True, capture_output=True, check=False)
+    delete_command = ["git", "branch", "-d" if contained else "-D", task.branch]
+    result = subprocess.run(delete_command, cwd=root, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         return {"branch": task.branch, "sha": task.sha, "result": "failed", "reason": "branch-delete-failed", "stderr": result.stderr.strip()}
-    return {"branch": task.branch, "sha": task.sha, "result": "deleted", "worktreeRemoved": path is not None}
+    return {
+        "branch": task.branch,
+        "sha": task.sha,
+        "integratedSha": integrated_sha,
+        "mode": mode,
+        "result": "deleted",
+        "worktreeRemoved": path is not None,
+    }
 
 
 def emit(payload: dict[str, Any], result_file: Path | None) -> None:
@@ -483,7 +524,7 @@ def run_locked(command_name: str, root: Path, action) -> dict[str, Any]:
         return {"status": "lock-busy", "command": command_name}
 
 
-def integrate(root: Path, expected_base: str, merges: list[Task], cleanups: list[Task]) -> dict[str, Any]:
+def integrate(root: Path, expected_base: str, merges: list[Task], cleanups: list[Task], mode: str) -> dict[str, Any]:
     for task in cleanups:
         if task.branch not in {item.branch for item in merges}:
             raise OrchestratorError("invalid-cleanup", f"Cleanup branch was not part of merge batch: {task.branch}")
@@ -491,7 +532,7 @@ def integrate(root: Path, expected_base: str, merges: list[Task], cleanups: list
     def action() -> dict[str, Any]:
         config = load_config(root)
         _, starting_base, runtime = require_expected_base(root, config, expected_base)
-        evidence = preflight_tasks(root, config, merges, starting_base)
+        evidence = preflight_tasks(root, merges, starting_base)
         final_base = starting_base
         merges_result: list[dict[str, Any]] = []
         environment: dict[str, Any] = {}
@@ -500,7 +541,7 @@ def integrate(root: Path, expected_base: str, merges: list[Task], cleanups: list
                 if evidence_for(merges_result, evidence, task) == "already-contained":
                     merges_result.append({"branch": task.branch, "sha": task.sha, "result": "skipped", "reason": "already-contained"})
                     continue
-                merges_result.append(merge_task(root, task))
+                merges_result.append(merge_task(root, task, mode))
             # A batch may intentionally update repository integration commands.
             # Verify with the merged contract, not the pre-merge configuration.
             merged_config = load_config(root)
@@ -527,7 +568,17 @@ def integrate(root: Path, expected_base: str, merges: list[Task], cleanups: list
                 payload["environment"] = error.details
             raise StoreResult(payload) from error
 
-        cleanup_results = [cleanup_task(root, merged_config, task, final_base) for task in cleanups]
+        integrated_by_branch = {str(item.get("branch")): item.get("integratedSha") for item in merges_result}
+        cleanup_results = [
+            cleanup_task(
+                root,
+                merged_config,
+                Task(task.branch, task.sha, integrated_by_branch.get(task.branch)),
+                final_base,
+                mode=mode,
+            )
+            for task in cleanups
+        ]
         failed_cleanup = any(item["result"] not in {"deleted"} for item in cleanup_results)
         return {
             "status": "cleanup-failed" if failed_cleanup else "verified-and-cleaned" if cleanups else "verified",
@@ -598,7 +649,10 @@ def cleanup(root: Path, expected_base: str, tasks: list[Task]) -> dict[str, Any]
 
     def action():
         _, starting_base, runtime = require_expected_base(root, config, expected_base)
-        results = [cleanup_task(root, config, task, starting_base) for task in tasks]
+        results = [
+            cleanup_task(root, config, task, starting_base, mode="squash" if task.integrated_sha else "merge")
+            for task in tasks
+        ]
         failed = any(item["result"] not in {"deleted"} for item in results)
         return {
             "status": "cleanup-failed" if failed else "cleaned",
@@ -626,6 +680,12 @@ def parser() -> argparse.ArgumentParser:
         if name == "integrate":
             command.add_argument("--merge", action="append", default=[], required=True)
             command.add_argument("--cleanup", action="append", default=[])
+            command.add_argument(
+                "--merge-mode",
+                choices=("squash", "merge"),
+                default="squash",
+                help="1/squash compresses each task into one base commit; 2/merge preserves task commits",
+            )
         elif name == "cleanup":
             command.add_argument("--cleanup", action="append", default=[], required=True)
     return result
@@ -641,7 +701,7 @@ def main() -> int:
         elif args.command == "integrate":
             merges = parse_task_values(args.merge, "--merge")
             cleanups = parse_task_values(args.cleanup, "--cleanup")
-            payload = integrate(root, args.expected_base_head, merges, cleanups)
+            payload = integrate(root, args.expected_base_head, merges, cleanups, args.merge_mode)
         elif args.command == "verify":
             payload = verify(root, args.expected_base_head)
         else:

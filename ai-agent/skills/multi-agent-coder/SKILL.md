@@ -1,6 +1,6 @@
 ---
 name: multi-agent-coder
-description: Develop and hand off one task in a host-managed worktree when the user explicitly invokes multi-agent-coder. Prepare the environment, run related verification and record readiness for an exact commit; leave integration to multi-agent-orchestrator. Do not activate automatically or merely to review this skill.
+description: Develop and hand off one task in a host-managed worktree when the user explicitly invokes multi-agent-coder. Prepare the environment, run related verification, and hand off an exact commit; leave readiness and integration to the developer and multi-agent-orchestrator. Do not activate automatically or merely to review this skill.
 license: MIT
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob
 ---
@@ -25,13 +25,13 @@ Keep these rules consistent with multi-agent-orchestrator:
   English kebab-case slug. Honor an explicit user/repo branch choice. Default base:
   `main`, overridden by `Multi-agent base-branch: <name>` or user instruction.
 - Identify the repository through its canonical Git common directory. Task code
-  belongs to its worktree. Shared Git refs/notes and documented repository-managed
-  caches, immutable baselines and checkout-specific runtime data are permitted.
-  Never modify another task's code, credentials, runtime data or processes.
+  belongs to its worktree. Documented repository-managed caches, immutable
+  baselines and checkout-specific runtime data are permitted. Never modify
+  another task's code, credentials, runtime data or processes.
 - Local-only by default: no push, fetch, pull, gc or global installs.
-- Ready describes a verified commit, not an application health response. Store the
-  JSON receipt below in `refs/notes/agent-task` on that exact commit. Missing,
-  malformed or legacy `status: ready`-only notes require verification again.
+- Readiness is a human decision made during integration, not a machine state
+  stored on the commit. Coder reports the exact commit and verification evidence;
+  the developer decides whether orchestrator may merge it.
 - Ignore rules handle generated output and secrets. Every non-ignored untracked
   file must be committed, deliberately ignored, or explicitly accounted for by
   repository policy; it cannot be dismissed merely because it is untracked.
@@ -80,16 +80,15 @@ actually ran and what remains unverified; time budgets do not turn failures gree
 Use the repository's start/status/logs/stop commands for functional checks. You may
 leave an explicitly identified session running while waiting for requested human
 acceptance. Report its checkout, session and phase through the repo status command.
-That phase is **waiting for acceptance**, not ready for integration. Do not start a
+That phase is **waiting for acceptance**, not ready for handoff. Do not start a
 new session blindly when one already exists, or kill processes using cached PIDs.
 
-Before normal finalization, stop this task's session and confirm shutdown. If the
-user asks to keep it open, hand off that state and defer the ready receipt until
-shutdown (unless the user explicitly overrides the readiness policy). Never stop
-another task's services. Manual acceptance is required only when the user or repo
-requires it, not for every change.
+Before normal handoff, stop this task's session and confirm shutdown. If the user
+asks to keep it open, report that state and let the developer decide whether
+integration may proceed. Never stop another task's services. Manual acceptance is
+required only when the user or repo requires it, not for every change.
 
-## Finalize an exact commit
+## Finalize and hand off an exact commit
 
 1. Finish the required human acceptance and stop owned services.
 2. Commit all meaningful files. Check `git status --porcelain=v1 --untracked-files=all`;
@@ -98,44 +97,12 @@ requires it, not for every change.
    and let integration validate the combination. If rebase/reset/cherry-pick is
    explicitly requested, stop the runtime first. On uncertain conflicts abort the
    operation; after a successful history/content change, rerun affected checks and
-   any acceptance invalidated by the change before marking ready.
-4. Run required verification against the final commit. Record its SHA and the
-   included base SHA (`git merge-base <testedHead> <base>`) as baseHead and the
-   base ref at verification time as observedBaseHead; confirm HEAD and tree are unchanged when
-   writing the note. If they changed during verification, validate again.
-5. Write the following receipt as JSON with actual values (redact command secrets); use a temporary file
-   and `git notes --ref=agent-task add -f -F <receipt-file> <testedHead>`.
+   any acceptance invalidated by the change.
+4. Run required verification against the final commit. Confirm that HEAD and the
+   worktree did not change during verification. If either changed, verify again.
+5. Report branch, final SHA, tested base/merge-base, diff summary, checks,
+   acceptance, runtime state and remaining risks. Do not label the commit ready.
+   That decision belongs to the developer when reviewing the integration batch.
 
-```json
-{
-  "schemaVersion": 1,
-  "status": "ready",
-  "branch": "agent/fix/example",
-  "testedHead": "<full task commit SHA>",
-  "baseBranch": "main",
-  "baseHead": "<full merge-base SHA included in testedHead>",
-  "observedBaseHead": "<full current base-ref SHA at verification>",
-  "checks": [{"command": "<actual command>", "result": "passed"}],
-  "manualAcceptance": {"required": false, "result": "not-required"},
-  "runtime": {"state": "stopped"}
-}
-```
-
-`baseHead` is included in the tested branch; observedBaseHead may be newer and
-is not claimed to have been integrated or tested with this task.
-
-For required human acceptance use `required: true, result: "passed"` only after
-actual acceptance. Runtime may be `not-started` if no session was launched. Do not
-mark ready with pending/failed checks, pending acceptance or a running session by
-default. Git notes attach to commits, so the branch field must also match: a branch
-alias pointing at a ready commit does not automatically inherit task readiness.
-
-Before replacing an existing note, verify it belongs to this task branch; do not
-overwrite another branch's receipt on an aliased commit. Concurrent notes updates
-can contend on the shared ref. For a Git lock/ref-update conflict only, reread the
-note and retry a bounded number of times while HEAD/tree remain unchanged; do not
-remove lock files or retry unrelated failures blindly.
-
-Report branch, tested SHA/base, diff summary, checks, acceptance, stopped runtime
-and any remaining risks. Hand off merging to multi-agent-orchestrator. Do not merge
-into the base, delete task branches, or archive host worktrees from this skill.
+Hand off merging to multi-agent-orchestrator. Do not merge into the base, delete
+task branches, or archive host worktrees from this skill.
