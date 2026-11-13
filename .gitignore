@@ -2,3 +2,5 @@
 .machine.nix
 result
 .direnv/
+__pycache__/
+*.py[cod]
