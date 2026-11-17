@@ -268,16 +268,14 @@ def discover(root: Path) -> dict[str, Any]:
             else {"state": "unknown" if path else "not-started", "processes": None}
         )
         contained = git_ok(root, "merge-base", "--is-ancestor", sha, base_head)
-        ahead = git_ok(root, "merge-base", "--is-ancestor", base_head, sha)
         subjects = git(root, "log", "--format=%s", f"{base_head}..{sha}").splitlines()
         ahead_count = int(git(root, "rev-list", "--count", f"{base_head}..{sha}") or 0)
+        ahead = ahead_count > 0
         behind_count = int(git(root, "rev-list", "--count", f"{sha}..{base_head}") or 0)
         diffstat = git(root, "diff", "--stat", f"{base_head}...{sha}")
         changed = has_content_diff(root, base_head, sha)
         if contained:
             status = "contained"
-        elif not ahead:
-            status = "diverged"
         elif not changed:
             status = "no-diff"
         elif worktree == "dirty":
@@ -338,8 +336,6 @@ def preflight_tasks(root: Path, tasks: list[Task], base_head: str) -> list[dict[
         if git_ok(root, "merge-base", "--is-ancestor", task.sha, base_head):
             evidence.append({"branch": task.branch, "sha": task.sha, "result": "already-contained"})
             continue
-        if not git_ok(root, "merge-base", "--is-ancestor", base_head, task.sha):
-            raise OrchestratorError("stale-task", f"{task.branch} does not contain current base {base_head}")
         if not has_content_diff(root, base_head, task.sha):
             raise OrchestratorError("no-task-diff", f"Task has no content diff from base: {task.branch}")
         path = worktrees.get(task.branch)

@@ -36,8 +36,10 @@ repo-documented caches/baselines and checkout-owned runtime data are permitted;
 other tasks' source, credentials, data and services are not.
 
 Present `Branch | Task | SHA | Ahead/behind | Diffstat | Worktree/runtime | Status`.
-Default candidates are ahead of base, not already contained in it, have a content
-diff, and have a clean live worktree or no live worktree. Runtime state is
+Default candidates have commits not in base, are not already contained in it, have
+a content diff from their merge base, and have a clean live worktree or no live
+worktree. They remain candidates when base has independent commits; report the
+ahead/behind counts and whether a live worktree can be rebased. Runtime state is
 informational, not a readiness gate; disclose a running task service to the
 developer. Dirty branches, contained branches and branches with no content diff
 are not candidates until the developer explicitly resolves the exception.
@@ -56,8 +58,10 @@ invalid, use the manual procedure in this document.
 ## Collect all decisions before execution
 
 After discovery, present one execution plan and collect every routine decision in
-the same reply: branch selection, merge mode, and whether to clean up after
-verification succeeds. Never silently substitute a new tip, branch, or order. A
+the same reply: branch selection, merge mode, whether to clean up after
+verification succeeds, and the planned rebase of behind branches in their live
+worktrees. Explain that rebase rewrites task commits and that missing worktrees
+will use direct integration. Never silently substitute a new tip, branch, or order. A
 compact reply such as `1 1 1` for every candidate or
 `2 agent/a=<sha>,agent/b=<sha> 1 1` for a custom list is preferred. `1 1 1` is
 the default only after the user explicitly approves the batch or says default/go;
@@ -80,7 +84,7 @@ Cleanup after successful integration verification
 ```
 
 Choice 1 means all branches with discovery status `candidate`; it never includes
-dirty, contained, diverged or no-diff branches. Choice 2 must select branches
+dirty, contained or no-diff branches. Choice 2 must select branches
 from the just-rendered table and may use `branch` names that uniquely match
 candidate rows or exact `branch=<full-sha>` entries. Resolve branch names to the
 displayed full SHAs before execution; if a name is ambiguous, missing, stale or
@@ -93,9 +97,10 @@ Do not ask another question while a configured integration is running unless a
 conflict, verification failure or safety blocker genuinely requires a human
 decision.
 
-Hold one exclusive integration lock for the canonical common directory across
-revalidation, merges, environment preparation, verification/fixes and any approved
-cleanup. For a configured repository, the bundled CLI acquires that lock itself:
+Serialize preparation and integration using the exclusive lock for the canonical
+common directory. For configured repositories, prepare rebases under the helper
+lock as described below, release it, then invoke the CLI, which acquires its own
+lock and revalidates the base and task SHAs before integration:
 
 ```text
 python3 <skill-directory>/scripts/agent_orchestrator.py integrate \
@@ -117,8 +122,10 @@ use `cleanup`; a squashed branch needs the integrated commit mapping emitted by
 --cleanup <branch>=<full-source-sha>=<full-integrated-sha>
 ```
 
-Read the JSON result and, on failure, the referenced verification log. Do not use
-the persistent lock shell for the configured flow.
+Pass the validated post-rebase SHA for each rebased branch to both `--merge` and
+the matching `--cleanup`; use the original SHA for branches not rebased. Read the
+JSON result and, on failure, the referenced verification log. Never invoke the
+configured CLI while holding the helper lock: it acquires the same lock itself.
 
 Prefer a documented repo equivalent, otherwise use the bundled helper:
 
@@ -127,9 +134,10 @@ python3 <skill-directory>/scripts/with-integration-lock.py --repo <main-root> --
 ```
 
 The helper uses POSIX flock on macOS/Linux with Python 3.
-Run it in a persistent interactive terminal and execute all integration mutations
-inside that same shell after every decision has been collected. Exit it when
-finished. The kernel lock is released on exit; do not delete a lock file or infer
+Run it in a persistent interactive terminal after every decision has been collected.
+Use it for worktree preparation; in the manual flow also execute integration and
+cleanup inside that shell. In the configured flow exit it after preparation before
+running the CLI. The kernel lock is released on exit; do not delete a lock file or infer
 lock ownership from a PID. If the helper/runtime is unavailable, use a documented
 equivalent or report the blocker; do not integrate without serialization.
 Do not carry out a long confirmation wait while blocking unrelated integration:
@@ -152,10 +160,40 @@ Inside the lock:
   or dependency replacement. Do not stop other task sessions without authorization.
 - Record the starting base SHA. Never fetch/pull or rewrite base history.
 
+## Prepare behind branches in their worktrees
+
+The configured CLI does not perform this preparation: perform it before `integrate`
+for configured and manual flows alike. Under the helper lock, recheck the base SHA,
+each approved branch tip and its worktree status. For each selected branch with a
+clean live worktree and commits behind the recorded base, rebase that branch in its
+own worktree onto the recorded base SHA (`git -C <worktree> rebase <base-sha>`).
+Do not rebase branches with no live worktree; disclose that they will be merged
+directly. Rebase onto the same recorded base for the whole batch; interactions
+between task branches may still conflict during integration.
+
+Rebase rewrites commits: retain an explicit mapping of approved original SHA to
+resulting SHA for each branch. Preserve merge topology with `--rebase-merges` when
+the task history contains merges. If rebase conflicts, inspect and resolve only
+changes understood with confidence in that worktree, then continue the rebase;
+report affected files and resolutions to the developer before integration. If
+uncertain, stop, report the exact state and leave the worktree available for the
+developer; do not merge or clean up. Never blindly choose a conflict side.
+
+After each rebase check the worktree is clean, the recorded base is an ancestor of
+the new tip, and review the rebased changes and conflict resolutions. Run the
+repository's applicable task verification in that worktree before merging; report
+the commands and results. If verification fails or the base moves during preparation,
+stop and report without merging. Report original and new SHAs and any conflicts
+before proceeding. Recheck the base and all resulting branch tips immediately before
+integration. Approval of the planned rebase covers only the resulting mapped tips;
+any other tip movement requires a fresh developer decision. In the configured flow,
+release the helper lock and pass the recorded base and mapped SHAs to the CLI; its
+locked preflight detects movement in the gap. In the manual flow retain the lock.
+
 ## Integrate immutable commits and verify
 
 For each still-approved candidate recheck the ref, then integrate the immutable
-confirmed object, not the mutable branch name. In default squash mode, use
+confirmed object or its verified post-rebase mapped SHA, not the mutable branch name. In default squash mode, use
 `git merge --squash <confirmed-full-sha>` and create one commit whose body
 records `Task-Branch` and `Task-Head`; if the squash has no content, record a
 no-op and do not create an empty commit. In explicit merge mode, use:
@@ -196,7 +234,8 @@ archival and persisted debugging-data deletion are separate lifecycle decisions.
 
 Immediately before each deletion, under the integration lock:
 
-1. Reread the current branch tip and verify it equals the approved source SHA. For
+1. Reread the current branch tip and verify it equals the approved source SHA or
+   its verified post-rebase mapped SHA. For
    a regular merge, verify it is an ancestor of the current target
    (`git merge-base --is-ancestor <current-tip> <target>`). Do not rely only on an
    old snapshot or `branch -d`'s upstream-dependent safety check. For a squash

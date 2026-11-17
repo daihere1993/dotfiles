@@ -111,6 +111,20 @@ class OrchestratorCliTests(unittest.TestCase):
         payload = cli("discover", "--repo", str(root), "--json")
         self.assertEqual(payload["candidates"][0]["status"], "dirty")
 
+    def test_diverged_task_is_discovered_and_integrated(self):
+        temporary, root, task_root, base, task = make_fixture()
+        current_base = commit(root, "independent main patch")
+        payload = cli("discover", "--repo", str(root), "--json")
+        candidate = payload["candidates"][0]
+        self.assertEqual(candidate["status"], "candidate")
+        self.assertTrue(candidate["aheadOfBase"])
+        self.assertEqual((candidate["aheadCount"], candidate["behindCount"]), (1, 1))
+        result = cli("integrate", "--repo", str(root), "--expected-base-head", current_base,
+                     "--merge", f"agent/test={task}")
+        self.assertEqual(result["status"], "verified", result)
+        self.assertTrue((root / "independent-main-patch.txt").exists())
+        self.assertTrue((root / "task-change.txt").exists())
+
     def test_integrate_requires_an_unchanged_expected_base(self):
         temporary, root, task_root, base, task = make_fixture()
         commit(root, "unrelated main movement")
