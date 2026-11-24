@@ -57,15 +57,19 @@ invalid, use the manual procedure in this document.
 
 ## Collect all decisions before execution
 
-After discovery, present one execution plan and collect every routine decision in
-the same reply: branch selection, merge mode, whether to clean up after
-verification succeeds, and the planned rebase of behind branches in their live
-worktrees. Explain that rebase rewrites task commits and that missing worktrees
-will use direct integration. Never silently substitute a new tip, branch, or order. A
-compact reply such as `1 1 1` for every candidate or
-`2 agent/a=<sha>,agent/b=<sha> 1 1` for a custom list is preferred. `1 1 1` is
-the default only after the user explicitly approves the batch or says default/go;
-silence is not approval.
+After discovery, present the candidate table and one execution plan. Lead with
+the default confirmation in the user's language. For example:
+
+> 回复「继续」即可按上表顺序合入全部候选，每个任务 squash 为一个提交，
+> 完整验证通过后清理对应分支和工作树。常规验证失败由 agent 自行修复并复验。
+
+Accept a clear standalone confirmation such as `继续`, `go`, `default`, `111`,
+or `1 1 1` for that displayed batch. Silence is not approval. Offer the
+numbered choices below for overrides. Collect any overrides and the planned
+rebase of behind branches in the same exchange. Explain that rebase rewrites
+task commits and that missing worktrees will use direct integration. Bind
+approval to the displayed base SHA, selected branches, task SHAs, and order.
+Never silently substitute a new tip, branch, or order.
 
 Use these numbered choices:
 
@@ -93,9 +97,11 @@ not a candidate, stop and report instead of guessing.
 Cleanup approval covers only the exact named tasks. It authorizes stopping that
 task's runtime, removing only its clean worktree when repository config allows
 it, and deleting only its branch after full integration verification passes.
-Do not ask another question while a configured integration is running unless a
-conflict, verification failure or safety blocker genuinely requires a human
-decision.
+Batch approval, including a custom selection, also authorizes diagnosing and
+fixing routine verification failures within the selected work and making
+fix-forward commits on the target. State this in the initial plan. Apply the
+recovery procedure below without asking for approval for each fix. Summarize
+routine fixes and their results in the final report.
 
 Serialize preparation and integration using the exclusive lock for the canonical
 common directory. For configured repositories, prepare rebases under the helper
@@ -114,7 +120,7 @@ python3 <skill-directory>/scripts/agent_orchestrator.py integrate \
 The default is squash mode. Use `--merge-mode merge` only for choice 2. Omit
 `--cleanup` for choice 2 cleanup retention. The CLI performs cleanup only after
 the complete integration verification passes. For re-verification after an
-approved fix-forward commit, use `verify`. For later cleanup of a regular merge,
+in-scope fix-forward commit, use `verify`. For later cleanup of a regular merge,
 use `cleanup`; a squashed branch needs the integrated commit mapping emitted by
 `integrate`:
 
@@ -181,12 +187,14 @@ developer; do not merge or clean up. Never blindly choose a conflict side.
 
 After each rebase check the worktree is clean, the recorded base is an ancestor of
 the new tip, and review the rebased changes and conflict resolutions. Run the
-repository's applicable task verification in that worktree before merging; report
-the commands and results. If verification fails or the base moves during preparation,
-stop and report without merging. Report original and new SHAs and any conflicts
-before proceeding. Recheck the base and all resulting branch tips immediately before
-integration. Approval of the planned rebase covers only the resulting mapped tips;
-any other tip movement requires a fresh developer decision. In the configured flow,
+repository's applicable task verification in that worktree before merging.
+Apply the same routine recovery criteria as for target verification. Fix
+in-scope failures in that worktree under the preparation lock and rerun its
+checks. Stop before merging if the base moves or verification remains blocked.
+Record the original and verified final SHAs, checks, and conflict resolutions.
+Recheck the base and all resulting branch tips immediately before integration.
+Approval covers the verified mapped tips, including in-scope preparation
+fixes. Other tip movement requires a fresh developer decision. In the configured flow,
 release the helper lock and pass the recorded base and mapped SHAs to the CLI; its
 locked preflight detects movement in the gap. In the manual flow retain the lock.
 
@@ -217,10 +225,29 @@ After the batch, use the repository setup command to reconcile merged dependenci
 and build inputs, then run the repository's required full integration verification.
 Do not republish baselines, reset profiles or substitute empty onboarding data as
 part of routine integration. Five/thirty-minute estimates are progress checkpoints,
-not correctness limits. Narrow failing checks only after recording the full failure
-set. Prefer fix-forward commits; rerun affected checks after fixes. Do not reset or
-rebase the base. A revert commit requires explicit user authorization and must
-respect migration/data-recovery rules; it is not an automatic escape from failures.
+not correctness limits.
+
+If verification fails, record the failure set from the run and read its log.
+Reproduce and diagnose failures with focused checks. Fix routine lint, type,
+test-environment, and test failures whose expected behavior is clear. Include
+small production fixes when the failure demonstrates a regression in the
+selected work and the intended behavior is established. Keep checks meaningful.
+Collect related fixes and run affected checks before repeating full verification.
+
+For fixes on the target, acquire the integration lock and recheck the target
+branch, expected HEAD, and worktree cleanliness before editing. Commit the
+fixes on top of the integrated batch and record their SHAs. In the configured
+flow, release the helper lock before invoking `verify` with the new exact HEAD.
+Repeat as long as there is a concrete in-scope recovery. After full verification
+passes, resume any approved cleanup using the original integration mappings
+and the verified final HEAD.
+
+Ask the developer when the expected product behavior is unclear, a fix would
+expand the approved scope, a branch or base moved outside this run, or an
+operation needs additional authorization. Stop and report if a blocker prevents
+further useful progress. Do not reset or rebase the base. A revert commit
+requires explicit user authorization and must respect migration/data-recovery
+rules.
 
 Report actual final base SHA, merge/fix SHAs, verification commands/results,
 conflicts, skipped tasks and runtime state. Distinguish code merged from integration
