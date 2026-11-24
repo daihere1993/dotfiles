@@ -269,8 +269,13 @@ Immediately before each deletion, under the integration lock:
    integration, verify the exact integrated commit emitted by the same run is an
    ancestor of the current target; the source branch intentionally is not.
 2. Recheck any attached worktree for tracked and non-ignored untracked work and
-   active services. If it is dirty, still in use, or its approved tip moved, stop
-   cleanup for that branch and report; do not archive/delete someone else's work.
+   active services and write activity. Stop the approved task's own runtime
+   through the repository command and confirm shutdown. If it is dirty, an
+   active writer remains, or its approved tip moved, stop cleanup for that
+   branch and report. An idle shell whose only connection is its current
+   directory does not block cleanup. Check for builds, tests, watchers, and
+   other processes that use the checkout before treating it as idle. Leave
+   idle shells running.
 3. For a regular merge, use `git branch -d <approved-branch>` only. For a verified
    squash mapping, use `git branch -D` for that exact source/integrated-SHA pair.
    If checked out, request host archival
@@ -280,10 +285,42 @@ Immediately before each deletion, under the integration lock:
 When the user has explicitly approved cleanup and repository config sets
 `allowWorktreeRemove: true`, the CLI may remove that exact clean worktree with
 `git worktree remove <path>` (without force) before `git branch -d` or the
-verified squash-mode `git branch -D`. If removal
-fails, keep the branch and report the reason. This explicit-cleanup exception does
-not authorize touching another worktree, persisted debugging data or ignored
-personal data.
+verified squash-mode `git branch -D`. If removal fails, retain the branch
+while checking for the partial-removal case below. This explicit-cleanup
+exception does not authorize touching another worktree, persisted debugging
+data or ignored personal data.
+
+### Recover a partial worktree removal
+
+If `git worktree remove` reports `Directory not empty`, record the exact path
+and recheck `git worktree list --porcelain` under the integration lock. Recover
+only the exact path from the authorized removal. If the worktree is still
+registered, diagnose the failure and retry normal removal only after resolving
+the cause. Keep the branch if normal removal remains blocked.
+
+If Git removed the registration but left the directory:
+
+1. Recheck the verified target HEAD, approved source SHA, integration ancestry,
+   and that neither the branch nor the path is registered in any worktree.
+   Confirm the residual path is the original directory and not a symlink.
+2. Audit the remaining files. Verify surviving tracked content and file types
+   against the approved source commit. Account for every other entry as a known
+   generated artifact using repository evidence. Preserve the directory and
+   branch if any file differs, is unclassified, or contains personal data.
+3. Recheck process activity immediately before moving the directory. A shell
+   with only a working-directory reference can stay open. If active writing
+   or another use cannot be ruled out, preserve the directory and branch and
+   report the blocker. Do not kill editor, terminal, or host processes.
+4. Move the audited directory to a unique, recoverable location in the local
+   Trash and verify the original path is gone. If the move is unavailable or
+   fails, retain the branch and report the reason. In configured repositories,
+   release the helper lock and rerun `cleanup` with the verified target HEAD
+   and the same approved source SHA and integration mapping. The CLI rechecks
+   the refs and deletes the branch. In the manual flow, keep the lock and use
+   the verified branch deletion procedure above.
+
+Report the Trash location in the final summary. A terminal left open in the
+former worktree can resume work after changing to the main worktree.
 
 Never use `-D` or force removal as a workaround. The squash-mode `-D` exception
 requires the exact source SHA, exact integrated SHA, verified ancestry, clean
